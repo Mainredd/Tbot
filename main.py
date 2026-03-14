@@ -13,6 +13,12 @@ import logging
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# Inicializar BD y aplicar seed ANTES de arrancar cualquier proceso
+from database import init_db
+logging.info("Inicializando base de datos...")
+init_db()
+logging.info("Base de datos lista.")
+
 BOT_SCRIPTS = ['bot.py', 'food_bot.py']
 SCRIPTS = BOT_SCRIPTS + ['web']
 
