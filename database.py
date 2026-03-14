@@ -100,6 +100,7 @@ def init_db():
             );
         ''')
     _seed_foods()
+    apply_seed_sql()
 
 
 def _seed_foods():
@@ -110,6 +111,21 @@ def _seed_foods():
                 'INSERT OR IGNORE INTO foods (name, kcal, protein, fat, carbs) VALUES (?,?,?,?,?)',
                 SEED_FOODS
             )
+
+
+def apply_seed_sql():
+    """Aplica seed.sql si existe y la tabla users está vacía (primera vez en Railway)."""
+    seed_file = Path(__file__).parent / 'seed.sql'
+    if not seed_file.exists():
+        return
+    with get_conn() as conn:
+        count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+        if count > 0:
+            return  # Ya hay datos, no hacer nada
+        sql = seed_file.read_text(encoding='utf-8')
+        conn.executescript(sql)
+        import logging
+        logging.info(f"✅ seed.sql aplicado correctamente")
 
 
 # ── Usuarios ──────────────────────────────────────────────────────────────────
