@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GymTracker 💪</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg:      #000;
+      --surface: #111;
+      --card:    #181818;
+      --border:  #2a2a2a;
+      --accent:  #c8ff00;
+      --green:   #00e676;
+      --red:     #ff4444;
+      --orange:  #ff9800;
+      --text:    #f0f0f0;
+      --muted:   #666;
+      --leo:     #4fc3f7;
+      --caro:    #f48fb1;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+    /* ── Header ── */
+    header {
+      border-bottom: 1px solid var(--border); padding: 18px 32px;
+      display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0;
+      background: rgba(0,0,0,0.92); backdrop-filter: blur(10px); z-index: 100;
+    }
+    header h1 { font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+    .header-actions { display: flex; gap: 8px; }
+
+    /* ── Buttons ── */
+    .btn {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); padding: 8px 16px; border-radius: 8px;
+      cursor: pointer; font-size: 0.85rem; transition: all 0.15s;
+    }
+    .btn:hover { background: var(--card); border-color: #444; }
+    .btn-accent { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+    .btn-accent:hover { background: #d4ff1a; }
+    .btn-danger { background: rgba(255,68,68,0.1); border-color: rgba(255,68,68,0.25); color: var(--red); }
+    .btn-danger:hover { background: rgba(255,68,68,0.2); }
+    .btn-sm { padding: 4px 10px; font-size: 0.78rem; }
+
+    /* ── Layout ── */
+    main { padding: 28px 32px; max-width: 1400px; margin: 0 auto; }
+
+    /* ── Tabs ── */
+    .tabs { display: flex; gap: 4px; margin-bottom: 24px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    .tab {
+      padding: 9px 18px; border-radius: 8px 8px 0 0; cursor: pointer;
+      font-size: 0.88rem; color: var(--muted);
+      border: 1px solid transparent; border-bottom: none;
+      transition: all 0.15s; margin-bottom: -1px;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-color: var(--border); border-bottom-color: var(--bg); background: var(--bg); }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ── Grid ── */
+    .users-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 24px; }
+
+    /* ── User section ── */
+    .user-section { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+    .user-header {
+      padding: 18px 22px; display: flex; align-items: center; gap: 12px;
+      border-bottom: 1px solid var(--border); justify-content: space-between;
+    }
+    .user-header-left { display: flex; align-items: center; gap: 12px; }
+    .user-avatar {
+      width: 42px; height: 42px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.1rem; font-weight: 700;
+    }
+    .avatar-leo  { background: rgba(79,195,247,0.12); color: var(--leo); border: 1px solid rgba(79,195,247,0.25); }
+    .avatar-caro { background: rgba(244,143,177,0.12); color: var(--caro); border: 1px solid rgba(244,143,177,0.25); }
+    .user-name { font-size: 1rem; font-weight: 600; }
+    .user-stats { display: flex; gap: 8px; margin-top: 3px; flex-wrap: wrap; }
+    .stat-badge {
+      font-size: 0.72rem; color: var(--muted); background: var(--card);
+      padding: 2px 8px; border-radius: 20px; border: 1px solid var(--border);
+    }
+
+    /* ── Gym: Sessions ── */
+    .sessions-list { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .session-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .session-head {
+      padding: 11px 14px; display: flex; align-items: center;
+      justify-content: space-between; cursor: pointer; user-select: none;
+    }
+    .session-head:hover { background: rgba(255,255,255,0.03); }
+    .session-left { display: flex; align-items: center; gap: 10px; }
+    .session-day { font-size: 0.83rem; font-weight: 600; }
+    .session-date { font-size: 0.72rem; color: var(--muted); margin-top: 1px; }
+    .session-actions { display: flex; gap: 6px; align-items: center; }
+    .session-chevron { color: var(--muted); font-size: 0.75rem; transition: transform 0.2s; margin-left: 4px; }
+    .session-card.open .session-chevron { transform: rotate(90deg); }
+    .session-body { display: none; border-top: 1px solid var(--border); }
+    .session-card.open .session-body { display: block; }
+    .exercise-row {
+      display: flex; align-items: center; padding: 9px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.04); gap: 10px;
+    }
+    .exercise-row:last-child { border-bottom: none; }
+    .ex-name { font-size: 0.81rem; flex: 1; min-width: 0; }
+    .ex-weights { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+    .weight-pill {
+      background: rgba(255,255,255,0.07); border: 1px solid var(--border);
+      border-radius: 6px; padding: 3px 8px; font-size: 0.74rem; font-weight: 600;
+    }
+    .ex-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+    /* ── Gym: PRs ── */
+    .prs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 24px; }
+    .pr-section { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+    .pr-list { padding: 6px 0; }
+    .pr-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 22px; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .pr-row:last-child { border-bottom: none; }
+    .pr-ex { font-size: 0.84rem; }
+    .pr-val { font-size: 0.9rem; font-weight: 700; color: var(--accent); }
+    .pr-val::after { content: ' kg'; font-size: 0.7rem; font-weight: 400; color: var(--muted); }
+
+    /* ── Comidas: Date nav ── */
+    .date-nav {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 20px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 10px 18px; width: fit-content;
+    }
+    .date-nav button {
+      background: none; border: 1px solid var(--border); color: var(--text);
+      width: 32px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 1rem;
+      transition: background 0.15s;
+    }
+    .date-nav button:hover { background: var(--card); }
+    #date-display { font-size: 0.9rem; font-weight: 600; min-width: 140px; text-align: center; }
+
+    /* ── Comidas: Totals bar ── */
+    .macro-totals {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+    }
+    .macro-item { text-align: center; }
+    .macro-value { font-size: 1.1rem; font-weight: 700; }
+    .macro-label { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+    .macro-kcal  { color: var(--orange); }
+    .macro-prot  { color: #e57373; }
+    .macro-fat   { color: #ffd54f; }
+    .macro-carbs { color: #81c784; }
+
+    /* ── Comidas: Meal groups ── */
+    .meal-group { border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .meal-group:last-child { border-bottom: none; }
+    .meal-header {
+      padding: 10px 16px; display: flex; align-items: center;
+      justify-content: space-between; font-size: 0.8rem;
+      font-weight: 600; color: var(--muted); background: rgba(255,255,255,0.02);
+    }
+    .food-row {
+      display: flex; align-items: center; padding: 8px 16px;
+      border-top: 1px solid rgba(255,255,255,0.03); gap: 10px;
+    }
+    .food-name { font-size: 0.82rem; flex: 1; }
+    .food-qty  { font-size: 0.78rem; color: var(--muted); flex-shrink: 0; }
+    .food-macros { display: flex; gap: 8px; font-size: 0.75rem; flex-shrink: 0; }
+    .food-macros span { color: var(--muted); }
+    .food-macros .kcal { color: var(--orange); font-weight: 600; }
+    .food-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+    .food-add-btn {
+      width: 100%; padding: 10px; background: none; border: none;
+      border-top: 1px solid var(--border);
+      color: var(--muted); font-size: 0.82rem; cursor: pointer; transition: color 0.15s;
+    }
+    .food-add-btn:hover { color: var(--accent); }
+
+    /* ── Biblioteca ── */
+    .library-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px; flex-wrap: wrap; gap: 10px;
+    }
+    .search-box {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); padding: 9px 14px; border-radius: 8px;
+      font-size: 0.88rem; outline: none; width: 260px; transition: border-color 0.15s;
+    }
+    .search-box:focus { border-color: #555; }
+    .food-table { width: 100%; border-collapse: collapse; }
+    .food-table th {
+      text-align: left; padding: 10px 14px; font-size: 0.75rem;
+      color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 500;
+    }
+    .food-table td {
+      padding: 10px 14px; font-size: 0.83rem; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .food-table tr:hover td { background: rgba(255,255,255,0.02); }
+    .food-table tr:last-child td { border-bottom: none; }
+    .food-table .num { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .food-table .actions { display: flex; gap: 4px; }
+    .table-wrap {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; overflow: hidden;
+    }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.78);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200; padding: 20px;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; width: 100%; max-width: 460px;
+      overflow: hidden; animation: slideUp 0.18s ease;
+    }
+    @keyframes slideUp { from { transform: translateY(14px); opacity: 0; } }
+    .modal-header {
+      padding: 18px 22px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-title { font-size: 1rem; font-weight: 600; }
+    .modal-close { background: none; border: none; color: var(--muted); font-size: 1.3rem; cursor: pointer; }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+    .modal-footer { padding: 16px 22px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
+    .field label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; }
+    .field input, .field select, .field textarea {
+      width: 100%; background: var(--card); border: 1px solid var(--border);
+      color: var(--text); padding: 9px 12px; border-radius: 8px;
+      font-size: 0.88rem; font-family: inherit; outline: none; transition: border-color 0.15s;
+    }
+    .field input:focus, .field select:focus { border-color: #555; }
+    .field-hint { font-size: 0.74rem; color: var(--muted); margin-top: 4px; }
+    .fields-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .fields-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px; background: var(--card);
+      border: 1px solid var(--border); color: var(--text); padding: 12px 18px;
+      border-radius: 10px; font-size: 0.85rem; z-index: 300;
+      animation: fadeIn 0.2s ease; display: flex; align-items: center; gap: 8px;
+    }
+    .toast.hidden { display: none; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } }
+
+    .empty-state { padding: 36px 20px; text-align: center; color: var(--muted); font-size: 0.88rem; }
+
+    @media (max-width: 600px) {
+      main { padding: 16px; }
+      header { padding: 14px 16px; }
+      .users-grid, .prs-grid { grid-template-columns: 1fr; }
+      .macro-totals { grid-template-columns: repeat(2, 1fr); }
+      .fields-4 { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>💪 GymTracker</h1>
+  <div class="header-actions">
+    <button class="btn" onclick="location.reload()">↻ Actualizar</button>
+    <button class="btn btn-accent" id="btn-new-action" onclick="handleNewAction()">+ Nuevo</button>
+  </div>
+</header>
+
+<main>
+  <div class="tabs">
+    <div class="tab active"  onclick="showPanel('sesiones',  this)">🏋️ Sesiones</div>
+    <div class="tab"         onclick="showPanel('prs',       this)">🏆 Records</div>
+    <div class="tab"         onclick="showPanel('comidas',   this)">🍽 Comidas</div>
+    <div class="tab"         onclick="showPanel('biblioteca',this)">📚 Biblioteca</div>
+  </div>
+
+  <!-- ══════════════════ SESIONES ══════════════════ -->
+  <div class="panel active" id="panel-sesiones">
+    {% if not users %}
+      <div class="empty-state">Sin datos. Registrá una sesión desde el bot o con el botón "Nuevo".</div>
+    {% else %}
+    <div class="users-grid">
+      {% for user in users %}
+      {% set color = 'leo' if user.name == 'Leo' else 'caro' %}
+      <div class="user-section">
+        <div class="user-header">
+          <div class="user-header-left">
+            <div class="user-avatar avatar-{{ color }}">{{ user.name[0] }}</div>
+            <div>
+              <div class="user-name">{{ user.name }}</div>
+              <div class="user-stats">
+                <span class="stat-badge">{{ user.stats.total }} sesiones</span>
+                {% for dtype, count in user.stats.by_type.items() %}
+                <span class="stat-badge">{{ dtype }}: {{ count }}</span>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="sessions-list">
+          {% if not user.history %}
+            <div class="empty-state">Sin sesiones registradas.</div>
+          {% else %}
+            {% for session in user.history %}
+            <div class="session-card {% if loop.first %}open{% endif %}" id="sess-{{ session.id }}">
+              <div class="session-head" onclick="toggleCard(this.parentElement, event)">
+                <div class="session-left">
+                  <span>{{ session.emoji }}</span>
+                  <div>
+                    <div class="session-day">{{ session.title }}</div>
+                    <div class="session-date">{{ session.date }}</div>
+                  </div>
+                </div>
+                <div class="session-actions" onclick="event.stopPropagation()">
+                  <button class="btn btn-sm" onclick="openAddExerciseModal({{ session.id }}, '{{ session.day_type }}')">+ Ejercicio</button>
+                  <button class="btn btn-sm btn-danger" onclick="confirmDeleteSession({{ session.id }})">🗑</button>
+                  <span class="session-chevron">▶</span>
+                </div>
+              </div>
+              <div class="session-body">
+                <div id="exlist-{{ session.id }}">
+                  {% if not session.exercises %}
+                    <div class="empty-state" style="padding:14px">Sin ejercicios.</div>
+                  {% else %}
+                    {% for ex in session.exercises %}
+                    <div class="exercise-row" id="exrow-{{ ex.id }}">
+                      <span class="ex-name">{{ ex.name }}</span>
+                      <div class="ex-weights">
+                        {% for w in ex.weights %}<span class="weight-pill">{{ w }}</span>{% endfor %}
+                      </div>
+                      <div class="ex-row-actions">
+                        <button class="btn btn-sm" onclick="openEditExerciseModal({{ ex.id }}, '{{ ex.name }}', {{ ex.weights | tojson }}, '{{ ex.note }}')">✏</button>
+                        <button class="btn btn-sm btn-danger" onclick="confirmDeleteExercise({{ ex.id }})">🗑</button>
+                      </div>
+                    </div>
+                    {% endfor %}
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ══════════════════ RECORDS ══════════════════ -->
+  <div class="panel" id="panel-prs">
+    {% if not users %}
+      <div class="empty-state">Sin datos.</div>
+    {% else %}
+    <div class="prs-grid">
+      {% for user in users %}
+      {% set color = 'leo' if user.name == 'Leo' else 'caro' %}
+      <div class="pr-section">
+        <div class="user-header">
+          <div class="user-header-left">
+            <div class="user-avatar avatar-{{ color }}">{{ user.name[0] }}</div>
+            <div>
+              <div class="user-name">{{ user.name }}</div>
+              <div class="user-stats"><span class="stat-badge">{{ user.prs | length }} ejercicios</span></div>
+            </div>
+          </div>
+        </div>
+        {% if not user.prs %}
+          <div class="empty-state">¡A entrenar!</div>
+        {% else %}
+          <div class="pr-list">
+            {% for ex_name, weight in user.prs.items() | sort %}
+            <div class="pr-row">
+              <span class="pr-ex">{{ ex_name }}</span>
+              <span class="pr-val">{{ weight }}</span>
+            </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ══════════════════ COMIDAS ══════════════════ -->
+  <div class="panel" id="panel-comidas">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <div class="date-nav">
+        <button onclick="changeDay(-1)">←</button>
+        <span id="date-display">—</span>
+        <button onclick="changeDay(+1)">→</button>
+      </div>
+      <button class="btn btn-accent" onclick="openLogFoodModal()">+ Registrar comida</button>
+    </div>
+
+    {% if not users %}
+      <div class="empty-state">Sin usuarios registrados.</div>
+    {% else %}
+    <div class="users-grid" id="food-grid">
+      {% for user in users %}
+      {% set color = 'leo' if user.name == 'Leo' else 'caro' %}
+      <div class="user-section" id="food-user-{{ user.id }}">
+        <div class="user-header">
+          <div class="user-header-left">
+            <div class="user-avatar avatar-{{ color }}">{{ user.name[0] }}</div>
+            <div>
+              <div class="user-name">{{ user.name }}</div>
+              <div class="user-stats" id="food-stats-{{ user.id }}">
+                <span class="stat-badge">—</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Macro totals -->
+        <div class="macro-totals" id="macro-totals-{{ user.id }}">
+          <div class="macro-item"><div class="macro-value macro-kcal" id="m-kcal-{{ user.id }}">0</div><div class="macro-label">kcal</div></div>
+          <div class="macro-item"><div class="macro-value macro-prot" id="m-prot-{{ user.id }}">0g</div><div class="macro-label">proteínas</div></div>
+          <div class="macro-item"><div class="macro-value macro-fat"  id="m-fat-{{ user.id }}">0g</div><div class="macro-label">grasas</div></div>
+          <div class="macro-item"><div class="macro-value macro-carbs" id="m-carbs-{{ user.id }}">0g</div><div class="macro-label">carbos</div></div>
+        </div>
+        <!-- Meals -->
+        <div id="meals-{{ user.id }}">
+          <div class="empty-state">Cargando...</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ══════════════════ BIBLIOTECA ══════════════════ -->
+  <div class="panel" id="panel-biblioteca">
+    <div class="library-header">
+      <input class="search-box" type="text" id="food-search" placeholder="🔍 Buscar alimento..." oninput="filterFoods()" />
+      <button class="btn btn-accent" onclick="openNewFoodModal()">+ Nuevo alimento</button>
+    </div>
+    <div class="table-wrap">
+      <table class="food-table" id="food-table">
+        <thead>
+          <tr>
+            <th>Alimento</th>
+            <th>Kcal / 100g</th>
+            <th>Prot / 100g</th>
+            <th>Grasas / 100g</th>
+            <th>Carbos / 100g</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="food-table-body">
+          {% for food in foods %}
+          <tr id="food-row-{{ food.id }}" data-name="{{ food.name | lower }}">
+            <td>{{ food.name }}</td>
+            <td class="num">{{ food.kcal }}</td>
+            <td class="num">{{ food.protein }}</td>
+            <td class="num">{{ food.fat }}</td>
+            <td class="num">{{ food.carbs }}</td>
+            <td>
+              <div class="actions">
+                <button class="btn btn-sm" onclick="openEditFoodModal({{ food.id }}, '{{ food.name }}', {{ food.kcal }}, {{ food.protein }}, {{ food.fat }}, {{ food.carbs }})">✏</button>
+                <button class="btn btn-sm btn-danger" onclick="confirmDeleteFood({{ food.id }})">🗑</button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<!-- ══════════════════ MODALES GYM ══════════════════ -->
+
+<div class="modal-overlay hidden" id="modal-new-session">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Nueva sesión de gym</span><button class="modal-close" onclick="closeModal('modal-new-session')">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Persona</label>
+        <select id="ns-user">{% for user in users %}<option value="{{ user.id }}">{{ user.name }}</option>{% endfor %}</select>
+      </div>
+      <div class="field"><label>Día</label>
+        <select id="ns-day">{% for key, w in workouts.items() %}<option value="{{ key }}">{{ w.emoji }} {{ w.title }}</option>{% endfor %}</select>
+      </div>
+      <div class="field"><label>Fecha</label><input type="date" id="ns-date" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-new-session')">Cancelar</button>
+      <button class="btn btn-accent" onclick="createSession()">Crear</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="modal-add-exercise">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Agregar ejercicio</span><button class="modal-close" onclick="closeModal('modal-add-exercise')">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Ejercicio</label><select id="ae-name"></select></div>
+      <div class="field">
+        <label>Pesos por serie</label>
+        <input type="text" id="ae-weights" placeholder="ej: 80 82.5 80 80" />
+        <div class="field-hint">Separados por espacios. PC = peso corporal.</div>
+      </div>
+      <div class="field"><label>Nota (opcional)</label><input type="text" id="ae-note" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-add-exercise')">Cancelar</button>
+      <button class="btn btn-accent" onclick="addExercise()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="modal-edit-exercise">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="edit-ex-title">Editar ejercicio</span><button class="modal-close" onclick="closeModal('modal-edit-exercise')">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Pesos por serie</label><input type="text" id="ee-weights" /></div>
+      <div class="field"><label>Nota (opcional)</label><input type="text" id="ee-note" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-edit-exercise')">Cancelar</button>
+      <button class="btn btn-accent" onclick="saveEditExercise()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════ MODALES COMIDAS ══════════════════ -->
+
+<div class="modal-overlay hidden" id="modal-log-food">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Registrar comida</span><button class="modal-close" onclick="closeModal('modal-log-food')">×</button></div>
+    <div class="modal-body">
+      <div class="fields-row">
+        <div class="field"><label>Persona</label>
+          <select id="lf-user">{% for user in users %}<option value="{{ user.id }}">{{ user.name }}</option>{% endfor %}</select>
+        </div>
+        <div class="field"><label>Comida</label>
+          <select id="lf-meal">
+            <option value="desayuno">🌅 Desayuno</option>
+            <option value="almuerzo">☀️ Almuerzo</option>
+            <option value="merienda">🍎 Merienda</option>
+            <option value="cena">🌙 Cena</option>
+            <option value="general">🍽 General</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>Alimento</label>
+        <select id="lf-food" onchange="onFoodSelect()">
+          <option value="">— Elegí un alimento —</option>
+          {% for food in foods %}<option value="{{ food.id }}" data-kcal="{{ food.kcal }}" data-prot="{{ food.protein }}" data-fat="{{ food.fat }}" data-carbs="{{ food.carbs }}" data-name="{{ food.name }}">{{ food.name }}</option>{% endfor %}
+          <option value="__manual__">✏ Ingresar manualmente</option>
+        </select>
+      </div>
+      <div class="field"><label>Cantidad (gramos)</label><input type="number" id="lf-qty" placeholder="ej: 200" oninput="calcMacros()" /></div>
+      <div id="lf-manual-fields" style="display:none">
+        <div class="fields-4">
+          <div class="field"><label>Kcal/100g</label><input type="number" id="lf-m-kcal" placeholder="0" oninput="calcMacros()" /></div>
+          <div class="field"><label>Prot/100g</label><input type="number" id="lf-m-prot" placeholder="0" oninput="calcMacros()" /></div>
+          <div class="field"><label>Grasas/100g</label><input type="number" id="lf-m-fat" placeholder="0" oninput="calcMacros()" /></div>
+          <div class="field"><label>Carbos/100g</label><input type="number" id="lf-m-carbs" placeholder="0" oninput="calcMacros()" /></div>
+        </div>
+      </div>
+      <div id="lf-preview" style="display:none; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:0.82rem; color:var(--muted);"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-log-food')">Cancelar</button>
+      <button class="btn btn-accent" onclick="logFood()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="modal-edit-food-log">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="efl-title">Editar registro</span><button class="modal-close" onclick="closeModal('modal-edit-food-log')">×</button></div>
+    <div class="modal-body">
+      <div class="fields-row">
+        <div class="field"><label>Cantidad (g)</label><input type="number" id="efl-qty" oninput="calcEditMacros()" /></div>
+        <div class="field"><label>Comida</label>
+          <select id="efl-meal">
+            <option value="desayuno">🌅 Desayuno</option>
+            <option value="almuerzo">☀️ Almuerzo</option>
+            <option value="merienda">🍎 Merienda</option>
+            <option value="cena">🌙 Cena</option>
+            <option value="general">🍽 General</option>
+          </select>
+        </div>
+      </div>
+      <div id="efl-preview" style="background:var(--card); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:0.82rem; color:var(--muted);"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-edit-food-log')">Cancelar</button>
+      <button class="btn btn-accent" onclick="saveEditFoodLog()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════ MODALES BIBLIOTECA ══════════════════ -->
+
+<div class="modal-overlay hidden" id="modal-new-food">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Nuevo alimento</span><button class="modal-close" onclick="closeModal('modal-new-food')">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Nombre</label><input type="text" id="nf-name" placeholder="ej: Pechuga de pollo" /></div>
+      <div class="fields-4">
+        <div class="field"><label>Kcal/100g</label><input type="number" id="nf-kcal" placeholder="0" /></div>
+        <div class="field"><label>Prot/100g</label><input type="number" id="nf-prot" placeholder="0" /></div>
+        <div class="field"><label>Grasas/100g</label><input type="number" id="nf-fat" placeholder="0" /></div>
+        <div class="field"><label>Carbos/100g</label><input type="number" id="nf-carbs" placeholder="0" /></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-new-food')">Cancelar</button>
+      <button class="btn btn-accent" onclick="createFood()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="modal-edit-food">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Editar alimento</span><button class="modal-close" onclick="closeModal('modal-edit-food')">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Nombre</label><input type="text" id="ef-name" /></div>
+      <div class="fields-4">
+        <div class="field"><label>Kcal/100g</label><input type="number" id="ef-kcal" /></div>
+        <div class="field"><label>Prot/100g</label><input type="number" id="ef-prot" /></div>
+        <div class="field"><label>Grasas/100g</label><input type="number" id="ef-fat" /></div>
+        <div class="field"><label>Carbos/100g</label><input type="number" id="ef-carbs" /></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-edit-food')">Cancelar</button>
+      <button class="btn btn-accent" onclick="saveEditFood()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+
+<!-- ══════════════════ SCRIPT ══════════════════ -->
+<script>
+  const EXERCISES_BY_DAY = {{ exercises_by_day | tojson }};
+  const USERS = {{ users | tojson }};
+  const MEAL_EMOJIS = { desayuno:'🌅', almuerzo:'☀️', merienda:'🍎', cena:'🌙', general:'🍽' };
+
+  let currentPanel = 'sesiones';
+  let currentDate = new Date();
+  let currentSessionId = null;
+  let currentLogId = null;
+  let currentFoodId = null;
+  let editLogBase = null; // { kcal_100, prot_100, fat_100, carbs_100 }
+
+  // ── Utils ─────────────────────────────────────────────────────────────────
+  function showPanel(name, tab) {
+    currentPanel = name;
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('panel-' + name).classList.add('active');
+    tab.classList.add('active');
+    const btnLabel = { sesiones:'+ Nueva sesión', prs:'', comidas:'+ Registrar comida', biblioteca:'+ Nuevo alimento' };
+    const btn = document.getElementById('btn-new-action');
+    btn.textContent = btnLabel[name] || '+ Nuevo';
+    btn.style.display = btnLabel[name] ? '' : 'none';
+    if (name === 'comidas') loadFoodDay();
+  }
+
+  function handleNewAction() {
+    if (currentPanel === 'sesiones')   openNewSessionModal();
+    else if (currentPanel === 'comidas')   openLogFoodModal();
+    else if (currentPanel === 'biblioteca') openNewFoodModal();
+  }
+
+  function toggleCard(card, e) { card.classList.toggle('open'); }
+  function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+  function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+  function toast(msg, ok = true) {
+    const el = document.getElementById('toast');
+    el.textContent = (ok ? '✅ ' : '❌ ') + msg;
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 2800);
+  }
+
+  function fmt(n) { return parseFloat(n).toFixed(1); }
+
+  // ── Gym: Nueva sesión ─────────────────────────────────────────────────────
+  function openNewSessionModal() {
+    document.getElementById('ns-date').value = currentDate.toISOString().split('T')[0];
+    openModal('modal-new-session');
+  }
+
+  async function createSession() {
+    const res = await fetch('/api/session', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: parseInt(document.getElementById('ns-user').value),
+        day_type: document.getElementById('ns-day').value,
+        date: document.getElementById('ns-date').value,
+      })
+    });
+    if (res.ok) { closeModal('modal-new-session'); toast('Sesión creada'); setTimeout(() => location.reload(), 800); }
+    else toast('Error', false);
+  }
+
+  // ── Gym: Ejercicios ───────────────────────────────────────────────────────
+  function openAddExerciseModal(sessionId, dayType) {
+    currentSessionId = sessionId;
+    const sel = document.getElementById('ae-name');
+    sel.innerHTML = '<option value="">— Elegí un ejercicio —</option>';
+    (EXERCISES_BY_DAY[dayType] || []).forEach(name => {
+      const opt = document.createElement('option'); opt.value = name; opt.textContent = name; sel.appendChild(opt);
+    });
+    const other = document.createElement('option'); other.value = '__custom__'; other.textContent = 'Otro (escribir)'; sel.appendChild(other);
+    document.getElementById('ae-weights').value = '';
+    document.getElementById('ae-note').value = '';
+    openModal('modal-add-exercise');
+  }
+
+  document.getElementById('ae-name').addEventListener('change', function() {
+    if (this.value === '__custom__') {
+      const name = prompt('Nombre del ejercicio:');
+      if (name) { this.options[this.options.length-1].value = name; this.options[this.options.length-1].textContent = name; this.value = name; }
+    }
+  });
+
+  async function addExercise() {
+    const name = document.getElementById('ae-name').value;
+    const weights = document.getElementById('ae-weights').value.trim();
+    if (!name || name === '__custom__') { toast('Elegí un ejercicio', false); return; }
+    if (!weights) { toast('Ingresá los pesos', false); return; }
+    const res = await fetch(`/api/session/${currentSessionId}/exercise`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, weights, note: document.getElementById('ae-note').value })
+    });
+    if (res.ok) { closeModal('modal-add-exercise'); toast('Ejercicio agregado'); setTimeout(() => location.reload(), 800); }
+    else toast('Error', false);
+  }
+
+  function openEditExerciseModal(logId, name, weights, note) {
+    currentLogId = logId;
+    document.getElementById('edit-ex-title').textContent = name;
+    document.getElementById('ee-weights').value = weights.join(' ');
+    document.getElementById('ee-note').value = note;
+    openModal('modal-edit-exercise');
+  }
+
+  async function saveEditExercise() {
+    const weights = document.getElementById('ee-weights').value.trim();
+    if (!weights) { toast('Ingresá los pesos', false); return; }
+    const res = await fetch(`/api/exercise/${currentLogId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ weights, note: document.getElementById('ee-note').value })
+    });
+    if (res.ok) { closeModal('modal-edit-exercise'); toast('Actualizado'); setTimeout(() => location.reload(), 800); }
+    else toast('Error', false);
+  }
+
+  async function confirmDeleteSession(id) {
+    if (!confirm('¿Eliminar esta sesión y todos sus ejercicios?')) return;
+    const res = await fetch(`/api/session/${id}`, { method: 'DELETE' });
+    if (res.ok) { toast('Sesión eliminada'); document.getElementById(`sess-${id}`)?.remove(); }
+    else toast('Error', false);
+  }
+
+  async function confirmDeleteExercise(id) {
+    if (!confirm('¿Eliminar este ejercicio?')) return;
+    const res = await fetch(`/api/exercise/${id}`, { method: 'DELETE' });
+    if (res.ok) { toast('Eliminado'); document.getElementById(`exrow-${id}`)?.remove(); }
+    else toast('Error', false);
+  }
+
+  // ── Comidas: fecha ────────────────────────────────────────────────────────
+  function formatDateDisplay(d) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const yesterday = new Date(today); yesterday.setDate(today.getDate()-1);
+    d.setHours(0,0,0,0);
+    const label = d.getTime()===today.getTime() ? 'Hoy' : d.getTime()===yesterday.getTime() ? 'Ayer' : '';
+    const str = d.toLocaleDateString('es-AR', { weekday:'short', day:'numeric', month:'short' });
+    return label ? `${label}, ${str}` : str;
+  }
+
+  function isoDate(d) { return d.toISOString().split('T')[0]; }
+
+  function changeDay(delta) {
+    currentDate.setDate(currentDate.getDate() + delta);
+    loadFoodDay();
+  }
+
+  async function loadFoodDay() {
+    document.getElementById('date-display').textContent = formatDateDisplay(new Date(currentDate));
+    for (const user of USERS) {
+      const logs = await fetch(`/api/food-logs?user_id=${user.id}&date=${isoDate(currentDate)}`).then(r => r.json());
+      renderFoodLogs(user.id, logs);
+    }
+  }
+
+  function renderFoodLogs(userId, logs) {
+    const totKcal = logs.reduce((s,l)=>s+l.kcal,0);
+    const totProt = logs.reduce((s,l)=>s+l.protein,0);
+    const totFat  = logs.reduce((s,l)=>s+l.fat,0);
+    const totCarbs= logs.reduce((s,l)=>s+l.carbs,0);
+
+    document.getElementById(`m-kcal-${userId}`).textContent  = Math.round(totKcal);
+    document.getElementById(`m-prot-${userId}`).textContent  = fmt(totProt)+'g';
+    document.getElementById(`m-fat-${userId}`).textContent   = fmt(totFat)+'g';
+    document.getElementById(`m-carbs-${userId}`).textContent = fmt(totCarbs)+'g';
+    document.getElementById(`food-stats-${userId}`).innerHTML =
+      `<span class="stat-badge">${logs.length} registros</span>`;
+
+    const container = document.getElementById(`meals-${userId}`);
+    if (!logs.length) { container.innerHTML = '<div class="empty-state">Sin registros este día.</div>'; return; }
+
+    const byMeal = {};
+    logs.forEach(l => { (byMeal[l.meal_type] = byMeal[l.meal_type]||[]).push(l); });
+
+    const order = ['desayuno','almuerzo','merienda','cena','general'];
+    let html = '';
+    for (const mealType of order) {
+      if (!byMeal[mealType]) continue;
+      const mkcal = byMeal[mealType].reduce((s,l)=>s+l.kcal,0);
+      html += `<div class="meal-group">
+        <div class="meal-header">
+          <span>${MEAL_EMOJIS[mealType]||'🍽'} ${mealType.charAt(0).toUpperCase()+mealType.slice(1)}</span>
+          <span>${Math.round(mkcal)} kcal</span>
+        </div>`;
+      byMeal[mealType].forEach(l => {
+        html += `<div class="food-row" id="flog-${l.id}">
+          <span class="food-name">${l.food_name}</span>
+          <span class="food-qty">${l.quantity_g}g</span>
+          <div class="food-macros">
+            <span class="kcal">${Math.round(l.kcal)} kcal</span>
+            <span>P:${fmt(l.protein)}g</span>
+            <span>G:${fmt(l.fat)}g</span>
+            <span>C:${fmt(l.carbs)}g</span>
+          </div>
+          <div class="food-row-actions">
+            <button class="btn btn-sm" onclick="openEditFoodLogModal(${l.id},'${l.food_name}',${l.quantity_g},${l.kcal},${l.protein},${l.fat},${l.carbs},'${l.meal_type}')">✏</button>
+            <button class="btn btn-sm btn-danger" onclick="confirmDeleteFoodLog(${l.id})">🗑</button>
+          </div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  }
+
+  // ── Comidas: log modal ────────────────────────────────────────────────────
+  function openLogFoodModal() {
+    document.getElementById('lf-food').value = '';
+    document.getElementById('lf-qty').value = '';
+    document.getElementById('lf-manual-fields').style.display = 'none';
+    document.getElementById('lf-preview').style.display = 'none';
+    openModal('modal-log-food');
+  }
+
+  function onFoodSelect() {
+    const sel = document.getElementById('lf-food');
+    const isManual = sel.value === '__manual__';
+    document.getElementById('lf-manual-fields').style.display = isManual ? '' : 'none';
+    calcMacros();
+  }
+
+  function calcMacros() {
+    const qty = parseFloat(document.getElementById('lf-qty').value) || 0;
+    const sel = document.getElementById('lf-food');
+    let kcal100, prot100, fat100, carbs100;
+    if (sel.value && sel.value !== '__manual__') {
+      const opt = sel.options[sel.selectedIndex];
+      kcal100=parseFloat(opt.dataset.kcal); prot100=parseFloat(opt.dataset.prot);
+      fat100=parseFloat(opt.dataset.fat); carbs100=parseFloat(opt.dataset.carbs);
+    } else if (sel.value === '__manual__') {
+      kcal100=parseFloat(document.getElementById('lf-m-kcal').value)||0;
+      prot100=parseFloat(document.getElementById('lf-m-prot').value)||0;
+      fat100=parseFloat(document.getElementById('lf-m-fat').value)||0;
+      carbs100=parseFloat(document.getElementById('lf-m-carbs').value)||0;
+    } else return;
+    const prev = document.getElementById('lf-preview');
+    if (qty > 0) {
+      prev.style.display='';
+      prev.innerHTML=`🔥 <b>${fmt(kcal100*qty/100)}</b> kcal &nbsp; 🥩 ${fmt(prot100*qty/100)}g &nbsp; 🫒 ${fmt(fat100*qty/100)}g &nbsp; 🍚 ${fmt(carbs100*qty/100)}g`;
+    } else { prev.style.display='none'; }
+  }
+
+  async function logFood() {
+    const userId = parseInt(document.getElementById('lf-user').value);
+    const sel = document.getElementById('lf-food');
+    const qty = parseFloat(document.getElementById('lf-qty').value);
+    const mealType = document.getElementById('lf-meal').value;
+    if (!sel.value || sel.value === '__manual__' && !sel.value) { toast('Elegí un alimento', false); return; }
+    if (!qty || qty <= 0) { toast('Ingresá la cantidad', false); return; }
+
+    let foodName, kcal, protein, fat, carbs;
+    if (sel.value === '__manual__') {
+      foodName = prompt('Nombre del alimento:') || 'Sin nombre';
+      kcal    = parseFloat(document.getElementById('lf-m-kcal').value)||0;
+      protein = parseFloat(document.getElementById('lf-m-prot').value)||0;
+      fat     = parseFloat(document.getElementById('lf-m-fat').value)||0;
+      carbs   = parseFloat(document.getElementById('lf-m-carbs').value)||0;
+      kcal = +(kcal*qty/100).toFixed(1); protein = +(protein*qty/100).toFixed(1);
+      fat  = +(fat*qty/100).toFixed(1);  carbs   = +(carbs*qty/100).toFixed(1);
+    } else {
+      const opt = sel.options[sel.selectedIndex];
+      foodName = opt.dataset.name;
+      kcal    = +(parseFloat(opt.dataset.kcal)*qty/100).toFixed(1);
+      protein = +(parseFloat(opt.dataset.prot)*qty/100).toFixed(1);
+      fat     = +(parseFloat(opt.dataset.fat)*qty/100).toFixed(1);
+      carbs   = +(parseFloat(opt.dataset.carbs)*qty/100).toFixed(1);
+    }
+
+    const res = await fetch('/api/food-log', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ user_id:userId, food_name:foodName, quantity_g:qty,
+        kcal, protein, fat, carbs, meal_type:mealType, date:isoDate(currentDate) })
+    });
+    if (res.ok) { closeModal('modal-log-food'); toast('Comida registrada'); loadFoodDay(); }
+    else toast('Error', false);
+  }
+
+  // ── Comidas: editar log ───────────────────────────────────────────────────
+  function openEditFoodLogModal(logId, name, qty, kcal, protein, fat, carbs, mealType) {
+    currentLogId = logId;
+    editLogBase = { kcal_per_qty: kcal/qty, prot_per_qty: protein/qty, fat_per_qty: fat/qty, carbs_per_qty: carbs/qty };
+    document.getElementById('efl-title').textContent = name;
+    document.getElementById('efl-qty').value = qty;
+    document.getElementById('efl-meal').value = mealType;
+    calcEditMacros();
+    openModal('modal-edit-food-log');
+  }
+
+  function calcEditMacros() {
+    if (!editLogBase) return;
+    const qty = parseFloat(document.getElementById('efl-qty').value)||0;
+    const prev = document.getElementById('efl-preview');
+    prev.innerHTML = `🔥 <b>${fmt(editLogBase.kcal_per_qty*qty)}</b> kcal &nbsp; 🥩 ${fmt(editLogBase.prot_per_qty*qty)}g &nbsp; 🫒 ${fmt(editLogBase.fat_per_qty*qty)}g &nbsp; 🍚 ${fmt(editLogBase.carbs_per_qty*qty)}g`;
+  }
+
+  async function saveEditFoodLog() {
+    const qty = parseFloat(document.getElementById('efl-qty').value);
+    if (!qty || qty <= 0) { toast('Cantidad inválida', false); return; }
+    const mealType = document.getElementById('efl-meal').value;
+    const res = await fetch(`/api/food-log/${currentLogId}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        quantity_g: qty,
+        kcal:    +(editLogBase.kcal_per_qty*qty).toFixed(1),
+        protein: +(editLogBase.prot_per_qty*qty).toFixed(1),
+        fat:     +(editLogBase.fat_per_qty*qty).toFixed(1),
+        carbs:   +(editLogBase.carbs_per_qty*qty).toFixed(1),
+        meal_type: mealType,
+      })
+    });
+    if (res.ok) { closeModal('modal-edit-food-log'); toast('Actualizado'); loadFoodDay(); }
+    else toast('Error', false);
+  }
+
+  async function confirmDeleteFoodLog(id) {
+    if (!confirm('¿Eliminar este registro?')) return;
+    const res = await fetch(`/api/food-log/${id}`, { method:'DELETE' });
+    if (res.ok) { toast('Eliminado'); loadFoodDay(); }
+    else toast('Error', false);
+  }
+
+  // ── Biblioteca ────────────────────────────────────────────────────────────
+  function filterFoods() {
+    const q = document.getElementById('food-search').value.toLowerCase();
+    document.querySelectorAll('#food-table-body tr').forEach(row => {
+      row.style.display = row.dataset.name.includes(q) ? '' : 'none';
+    });
+  }
+
+  function openNewFoodModal() {
+    ['nf-name','nf-kcal','nf-prot','nf-fat','nf-carbs'].forEach(id => document.getElementById(id).value = '');
+    openModal('modal-new-food');
+  }
+
+  async function createFood() {
+    const name = document.getElementById('nf-name').value.trim();
+    if (!name) { toast('Ingresá un nombre', false); return; }
+    const res = await fetch('/api/food', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        name, kcal: parseFloat(document.getElementById('nf-kcal').value)||0,
+        protein: parseFloat(document.getElementById('nf-prot').value)||0,
+        fat: parseFloat(document.getElementById('nf-fat').value)||0,
+        carbs: parseFloat(document.getElementById('nf-carbs').value)||0,
+      })
+    });
+    if (res.ok) { closeModal('modal-new-food'); toast('Alimento agregado'); setTimeout(() => location.reload(), 800); }
+    else toast('Error', false);
+  }
+
+  function openEditFoodModal(id, name, kcal, prot, fat, carbs) {
+    currentFoodId = id;
+    document.getElementById('ef-name').value  = name;
+    document.getElementById('ef-kcal').value  = kcal;
+    document.getElementById('ef-prot').value  = prot;
+    document.getElementById('ef-fat').value   = fat;
+    document.getElementById('ef-carbs').value = carbs;
+    openModal('modal-edit-food');
+  }
+
+  async function saveEditFood() {
+    const name = document.getElementById('ef-name').value.trim();
+    if (!name) { toast('Ingresá un nombre', false); return; }
+    const res = await fetch(`/api/food/${currentFoodId}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        name, kcal: parseFloat(document.getElementById('ef-kcal').value)||0,
+        protein: parseFloat(document.getElementById('ef-prot').value)||0,
+        fat: parseFloat(document.getElementById('ef-fat').value)||0,
+        carbs: parseFloat(document.getElementById('ef-carbs').value)||0,
+      })
+    });
+    if (res.ok) { closeModal('modal-edit-food'); toast('Actualizado'); setTimeout(() => location.reload(), 800); }
+    else toast('Error', false);
+  }
+
+  async function confirmDeleteFood(id) {
+    if (!confirm('¿Eliminar este alimento de la biblioteca?')) return;
+    const res = await fetch(`/api/food/${id}`, { method:'DELETE' });
+    if (res.ok) { toast('Eliminado'); document.getElementById(`food-row-${id}`)?.remove(); }
+    else toast('Error', false);
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => m.classList.add('hidden'));
+  });
+
+  // Pre-cargar comidas si arranca en esa pestaña
+  document.getElementById('date-display').textContent = formatDateDisplay(new Date(currentDate));
+</script>
+</body>
+</html>
