@@ -13,12 +13,18 @@ import logging
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-SCRIPTS = ['bot.py', 'food_bot.py', 'app.py']
+BOT_SCRIPTS = ['bot.py', 'food_bot.py']
+SCRIPTS = BOT_SCRIPTS + ['web']
 
 
 def run_script(script: str):
     logging.info(f"Iniciando {script}...")
-    result = subprocess.run([sys.executable, script])
+    if script == 'web':
+        import os
+        port = os.environ.get('PORT', '5000')
+        result = subprocess.run(['gunicorn', 'app:app', '--bind', f'0.0.0.0:{port}', '--workers', '2', '--timeout', '60'])
+    else:
+        result = subprocess.run([sys.executable, script])
     logging.warning(f"{script} terminó con código {result.returncode}")
 
 
