@@ -37,29 +37,29 @@ async def understand_intent(text: str) -> dict | None:
     try:
         resp = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=200,
+            max_tokens=400,
             messages=[{"role": "user", "content":
                 f"""Sos un asistente de nutrición. Analizá este mensaje y devolvé SOLO JSON sin markdown:
 "{text}"
 
 Detectá el intent:
-- "log_food": el usuario quiere registrar que comió algo. Extraé food_name, quantity_g, meal_type.
-- "add_to_library": el usuario quiere agregar/guardar/crear un alimento en la biblioteca. Usá tu conocimiento para estimar macros por 100g.
-- "unknown": no es sobre comida o no se entiende.
+- "log_food": registrar uno o más alimentos comidos. Extraé TODOS los ítems del mensaje.
+- "add_to_library": agregar un alimento a la biblioteca. Estimá macros por 100g.
+- "unknown": no es sobre comida.
 
-Palabras clave para add_to_library: "agrega", "agregá", "añadí", "guardá", "guarda", "crea", "nuevo alimento", "a la biblioteca", "en la biblioteca", "registrá el alimento", "agregar".
+Palabras clave add_to_library: "agrega", "agregá", "guardá", "guarda", "a la biblioteca", "en la biblioteca".
 
-Conversiones para log_food:
+Conversiones:
 - 1 huevo = 55g | 1 clara = 33g | 1 yema = 18g | 1 cucharada = 15g | 1 cucharadita = 5g
 - 1 taza cereal/arroz/avena = 80g | 1 taza líquido = 240g | 1 vaso = 250g
-- 1 rebanada pan = 30g | 1 banana = 120g | 1 manzana = 150g
+- 1 rebanada pan = 30g | 1 banana = 120g | 1 manzana = 150g | 1 barra chocolate = 40g
+- meal_type: detectá de contexto (desayuno/almuerzo/merienda/cena), si no → "general"
 
-Respuesta JSON exacta (todos los campos siempre presentes):
-{{"intent":"log_food|add_to_library|unknown","food_name":"nombre en español","quantity_g":0,"meal_type":"general","kcal":0,"protein":0,"fat":0,"carbs":0}}
+Respuesta JSON exacta:
+{{"intent":"log_food|add_to_library|unknown","items":[{{"food_name":"nombre","quantity_g":0,"meal_type":"general"}}],"food_name":"","kcal":0,"protein":0,"fat":0,"carbs":0}}
 
-- Para log_food: completá food_name, quantity_g, meal_type. kcal/protein/fat/carbs = 0.
-- Para add_to_library: completá food_name y estimá kcal/protein/fat/carbs por 100g con tu conocimiento. quantity_g = 0.
-- meal_type: detectá de palabras clave (desayuno, almuerzo, cena, merienda), si no → "general"
+- log_food: "items" tiene TODOS los alimentos del mensaje (1 o más líneas/ítems).
+- add_to_library: "food_name" con el nombre, estimá kcal/protein/fat/carbs por 100g. items=[].
 - Solo JSON válido, sin texto extra."""
             }]
         )
@@ -271,65 +271,90 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ── Intent: registrar comida ──────────────────────────────────────────────
-    qty       = float(parsed.get('quantity_g', 0))
-    meal_type = parsed.get('meal_type', 'general')
-    emoji     = MEAL_EMOJIS.get(meal_type, '🍽')
+    # ── Intent: registrar comida (uno o varios) ───────────────────────────────
+    items = parsed.get('items') or []
+    # Fallback para modelos que devuelvan el formato viejo
+    if not items and parsed.get('food_name') and parsed.get('quantity_g'):
+        items = [{'food_name': parsed['food_name'],
+                  'quantity_g': parsed['quantity_g'],
+                  'meal_type': parsed.get('meal_type', 'general')}]
 
-    if not qty:
+    if not items:
         await thinking.edit_text(
-            f"No entendí la cantidad de *{food_name}*.\nProbá: `200g de {food_name}`",
+            f"No entendí la cantidad.\nProbá: `200g de pollo` o listá todo junto:\n`200g merluza\n100g arroz\n1 banana`",
             parse_mode='Markdown'
         )
         return
 
-    # 2. Buscar en biblioteca local
-    food = db.get_food_by_name(food_name)
-    if food:
-        kcal, protein, fat, carbs = calc_macros(food, qty)
-        today_ar = datetime.now(AR).strftime('%Y-%m-%d')
-        db.log_food_with_date(user_id, food['name'], qty, kcal, protein, fat, carbs, meal_type, today_ar)
+    today_ar  = datetime.now(AR).strftime('%Y-%m-%d')
+    logged    = []   # {name, qty, kcal, meal_type}
+    not_found = []   # {name, qty} — no estaban en ninguna DB
+
+    # Si hay más de 1 ítem, mostrar mensaje de búsqueda
+    if len(items) > 1:
+        await thinking.edit_text(f"🔍 Buscando {len(items)} alimentos...")
+
+    for item in items:
+        food_name = (item.get('food_name') or '').strip()
+        qty       = float(item.get('quantity_g') or 0)
+        meal_type = item.get('meal_type') or 'general'
+        if not food_name or qty <= 0:
+            continue
+
+        # Buscar en biblioteca local
+        food = db.get_food_by_name(food_name)
+        if food:
+            kcal, protein, fat, carbs = calc_macros(food, qty)
+            db.log_food_with_date(user_id, food['name'], qty, kcal, protein, fat, carbs, meal_type, today_ar)
+            logged.append({'name': food['name'], 'qty': qty, 'kcal': kcal,
+                           'protein': protein, 'fat': fat, 'carbs': carbs, 'meal_type': meal_type})
+            continue
+
+        # Buscar en Open Food Facts
+        off = await search_off(food_name)
+        if off:
+            kcal, protein, fat, carbs = calc_macros(off, qty)
+            db.log_food_with_date(user_id, off['name'], qty, kcal, protein, fat, carbs, meal_type, today_ar)
+            logged.append({'name': off['name'], 'qty': qty, 'kcal': kcal,
+                           'protein': protein, 'fat': fat, 'carbs': carbs, 'meal_type': meal_type})
+        else:
+            not_found.append({'name': food_name, 'qty': qty})
+
+    # ── Respuesta ─────────────────────────────────────────────────────────────
+    if not logged and not not_found:
+        await thinking.edit_text("No pude procesar ningún alimento. Revisá el formato.")
+        return
+
+    # Caso simple: 1 ítem logueado, ninguno pendiente → mostrar confirmación con botón guardar
+    if len(logged) == 1 and not not_found and len(items) == 1:
+        l = logged[0]
+        emoji = MEAL_EMOJIS.get(l['meal_type'], '🍽')
         await thinking.edit_text(
-            f"{emoji} *{food['name']}* — {qty:.0f}g\n{macros_line(kcal, protein, fat, carbs)}",
+            f"{emoji} *{l['name']}* — {l['qty']:.0f}g\n"
+            f"{macros_line(l['kcal'], l['protein'], l['fat'], l['carbs'])}",
             parse_mode='Markdown'
         )
         return
 
-    # 3. No está en biblioteca — buscar en Open Food Facts
-    await thinking.edit_text(f"🔍 Buscando *{food_name}* en internet...", parse_mode='Markdown')
-    off = await search_off(food_name)
+    # Caso múltiple: mostrar resumen
+    lines = []
+    total_kcal = sum(l['kcal'] for l in logged)
+    total_prot = sum(l['protein'] for l in logged)
 
-    if off:
-        kcal, protein, fat, carbs = calc_macros(off, qty)
-        context.user_data['pending_food'] = {
-            'user_id': user_id, 'food_name': off['name'], 'quantity_g': qty,
-            'meal_type': meal_type, 'kcal': kcal, 'protein': protein,
-            'fat': fat, 'carbs': carbs,
-            'kcal_100': off['kcal'], 'protein_100': off['protein'],
-            'fat_100': off['fat'],   'carbs_100': off['carbs'],
-        }
-        keyboard = [[
-            InlineKeyboardButton("✅ Registrar + guardar", callback_data="food_save"),
-            InlineKeyboardButton("📝 Solo registrar",      callback_data="food_nosave"),
-        ], [
-            InlineKeyboardButton("❌ Cancelar", callback_data="food_cancel"),
-        ]]
-        await thinking.edit_text(
-            f"Encontré en internet:\n\n"
-            f"{emoji} *{off['name']}* — {qty:.0f}g\n"
-            f"{macros_line(kcal, protein, fat, carbs)}\n\n"
-            "¿Qué hacemos?",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    else:
-        await thinking.edit_text(
-            f"❓ *{food_name}* no está en ninguna base de datos.\n\n"
-            "Podés:\n"
-            f"• Pedirme que lo agregue: `agrega {food_name}`\n"
-            f"• O mandá los macros: `{food_name} {qty:.0f}g 200kcal 20p 8g 15c`",
-            parse_mode='Markdown'
-        )
+    for l in logged:
+        emoji = MEAL_EMOJIS.get(l['meal_type'], '🍽')
+        lines.append(f"{emoji} *{l['name']}* {l['qty']:.0f}g — {l['kcal']:.0f} kcal")
+
+    if not_found:
+        lines.append("")
+        lines.append("❓ *No encontré:*")
+        for n in not_found:
+            lines.append(f"  • {n['name']} — usá `agrega {n['name']}` para agregarlo")
+
+    if len(logged) > 1:
+        lines.append(f"\n📊 *Total: {total_kcal:.0f} kcal | {total_prot:.1f}g prot*")
+
+    await thinking.edit_text('\n'.join(lines), parse_mode='Markdown')
 
 
 # ── Handler de macros manuales ────────────────────────────────────────────────
