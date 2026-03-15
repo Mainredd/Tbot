@@ -327,39 +327,33 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
         english_name = food_name_es
         keywords = []
 
-    logging.info(f"[USDA] '{food_name_es}' → query='{english_name}' keywords={keywords}")
+    # Usar solo la keyword principal (sin prep words) para el query USDA.
+    # "hake, cooked" confunde el ranking de relevancia → buscar solo "hake"
+    PREP_WORDS = {"cooked","raw","fried","boiled","grilled","baked",
+                  "roasted","steamed","dried","fresh","frozen","canned"}
+    food_keywords = [k for k in keywords if k not in PREP_WORDS]
+    main_keyword = food_keywords[0] if food_keywords else english_name.split(",")[0].split()[0]
+    logging.info(f"[USDA] '{food_name_es}' → main_keyword='{main_keyword}' filter_words={food_keywords or [main_keyword]}")
 
     api_key = os.environ.get("USDA_API_KEY", "DEMO_KEY")
-    logging.info(f"[USDA] usando key={'CUSTOM' if api_key != 'DEMO_KEY' else 'DEMO_KEY'}")
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 "https://api.nal.usda.gov/fdc/v1/foods/search",
                 params={
-                    "query": english_name,
+                    "query": main_keyword,
                     "api_key": api_key,
                     "dataType": "Foundation,SR Legacy",
                     "pageSize": 20,
                 }
             )
-        logging.info(f"[USDA] status={resp.status_code} body={resp.text[:200]}")
         foods = resp.json().get("foods", [])
     except Exception as e:
         logging.error(f"[USDA] request error: {e}")
         return []
 
-    # Palabras genéricas de preparación — no sirven para identificar el alimento
-    PREP_WORDS = {"cooked","raw","fried","boiled","grilled","baked",
-                  "roasted","steamed","dried","fresh","frozen","canned"}
-
-    # Usar keywords de Claude si están disponibles; si no, extraer el nombre del alimento
-    # excluyendo las palabras de preparación genéricas
-    if keywords:
-        filter_words = [k for k in keywords if k not in PREP_WORDS] or keywords[:1]
-    else:
-        filter_words = [w for w in english_name.lower().split()
-                        if len(w) > 3 and w not in PREP_WORDS]
+    filter_words = food_keywords if food_keywords else [main_keyword]
 
     results = []
     for food in foods:
@@ -388,7 +382,7 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
 async def _off_search_terms(terms: str, query_words: list[str]) -> list[dict]:
     """Busca en OFF con ciertos términos y filtra por relevancia."""
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 "https://world.openfoodfacts.org/cgi/search.pl",
                 params={
