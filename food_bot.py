@@ -223,7 +223,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 1. Claude entiende el intent
     parsed = await understand_intent(text)
-    if not parsed or parsed.get('intent') == 'unknown' or not parsed.get('food_name'):
+    intent = parsed.get('intent', 'unknown') if parsed else 'unknown'
+
+    if not parsed or intent == 'unknown':
         await thinking.edit_text(
             "No entendí 🤔\n\n"
             "Podés decirme:\n"
@@ -233,8 +235,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    intent    = parsed.get('intent', 'log_food')
-    food_name = parsed['food_name'].strip()
+    if intent == 'add_to_library' and not parsed.get('food_name'):
+        await thinking.edit_text(
+            "No entendí 🤔\n\n"
+            "Podés decirme:\n"
+            "• Qué comiste: `5 huevos` o `almuerzo: 1 taza de arroz`\n"
+            "• Agregar a biblioteca: `agrega dulce de leche`",
+            parse_mode='Markdown'
+        )
+        return
+
+    food_name = parsed.get('food_name', '').strip()
 
     # ── Intent: agregar a biblioteca ─────────────────────────────────────────
     if intent == 'add_to_library':
