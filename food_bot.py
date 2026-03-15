@@ -391,6 +391,9 @@ async def _off_search_terms(terms: str, query_words: list[str]) -> list[dict]:
                     "fields": "product_name,nutriments",
                 }
             )
+        # Palabras de productos procesados/preparados — no sirven para ingredientes genéricos
+        PROCESSED = {"rebozad","empan","frit","roman","gratin","preparad",
+                     "precocid","plat","apanad","tempura","nugget","croqueta"}
         results = []
         for product in resp.json().get("products", []):
             n = product.get("nutriments", {})
@@ -398,8 +401,15 @@ async def _off_search_terms(terms: str, query_words: list[str]) -> list[dict]:
             if not kcal or float(kcal) <= 0:
                 continue
             pname = (product.get("product_name") or "").lower()
-            # Al menos una palabra del query debe aparecer en el nombre del producto
+            # El término debe aparecer en el nombre
             if not any(w in pname for w in query_words):
+                continue
+            # Excluir productos procesados (rebozado, empanado, etc.)
+            if any(p in pname for p in PROCESSED):
+                continue
+            # Excluir productos con nombre muy largo (platos preparados)
+            # "Merluza" o "Filetes de merluza" OK; "Merluza al limón con salsa..." no
+            if len(pname.split()) > 4:
                 continue
             results.append({
                 "source":  product.get("product_name", terms),
@@ -410,6 +420,7 @@ async def _off_search_terms(terms: str, query_words: list[str]) -> list[dict]:
             })
             if len(results) >= 6:
                 break
+        logging.info(f"[OFF] '{terms}' → {len(results)} resultados tras filtro: {[r['source'][:30] for r in results]}")
         return results
     except Exception as e:
         logging.error(f"OFF search '{terms}' error: {e}")
