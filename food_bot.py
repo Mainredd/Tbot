@@ -101,12 +101,21 @@ async def read_label_with_claude(image_bytes: bytes) -> dict | None:
 # ── Claude: estimar macros de un alimento desconocido ────────────────────────
 
 async def estimate_macros_with_claude(food_name: str) -> dict | None:
+    """Primero intenta USDA; si falla, estima con Claude."""
+    # 1. USDA (preciso)
+    usda = await search_usda(food_name)
+    if usda:
+        usda['estimated'] = False
+        return usda
+
+    # 2. Fallback: Claude
     try:
         resp = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=150,
             messages=[{"role": "user", "content":
                 f"""Usando tu conocimiento nutricional, estimá los macros por 100g de: "{food_name}"
+Sé muy preciso: si es crudo vs cocido, frito vs hervido, etc., los valores deben diferir correctamente.
 Devolvé SOLO JSON sin markdown:
 {{"kcal":0,"protein":0,"fat":0,"carbs":0}}
 Solo números, sin texto extra."""
@@ -160,6 +169,56 @@ async def search_off(name: str) -> dict | None:
                 }
     except Exception as e:
         logging.error(f"OFF search error: {e}")
+    return None
+
+
+# ── USDA FoodData Central ────────────────────────────────────────────────────
+
+async def search_usda(food_name_es: str) -> dict | None:
+    """Busca en USDA FoodData Central (Foundation + SR Legacy). Traduce al inglés con Claude."""
+    try:
+        tr = await ai.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=60,
+            messages=[{"role": "user", "content":
+                f"Translate this Spanish food name to English for a USDA nutrition database. "
+                f"Be specific about preparation: raw/cooked/fried/boiled etc. "
+                f"Food: '{food_name_es}'. Reply with ONLY the English name."
+            }]
+        )
+        english_name = tr.content[0].text.strip()
+    except Exception:
+        english_name = food_name_es
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.nal.usda.gov/fdc/v1/foods/search",
+                params={
+                    "query": english_name,
+                    "api_key": "DEMO_KEY",
+                    "dataType": "Foundation,SR Legacy",
+                    "pageSize": 5,
+                }
+            )
+            data = resp.json()
+    except Exception as e:
+        logging.error(f"USDA search error: {e}")
+        return None
+
+    for food in data.get("foods", []):
+        nutrients = {n["nutrientId"]: n["value"] for n in food.get("foodNutrients", [])}
+        kcal = float(nutrients.get(1008, 0))
+        if kcal <= 0:
+            continue
+        return {
+            "name":    food_name_es,
+            "kcal":    round(kcal, 1),
+            "protein": round(float(nutrients.get(1003, 0)), 1),
+            "fat":     round(float(nutrients.get(1004, 0)), 1),
+            "carbs":   round(float(nutrients.get(1005, 0)), 1),
+            "source":  food.get("description", english_name),
+        }
     return None
 
 
@@ -285,11 +344,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Intent: agregar a biblioteca ─────────────────────────────────────────
     if intent == 'add_to_library':
-        kcal    = round(float(parsed.get('kcal',    0)), 1)
-        protein = round(float(parsed.get('protein', 0)), 1)
-        fat     = round(float(parsed.get('fat',     0)), 1)
-        carbs   = round(float(parsed.get('carbs',   0)), 1)
-
         # ¿Ya existe en la biblioteca? (match estricto, no por palabras sueltas)
         existing = db.get_food_exact(food_name)
         if existing:
@@ -299,6 +353,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='Markdown'
             )
             return
+
+        await thinking.edit_text("🔍 Buscando en USDA y fuentes nutricionales...")
+
+        # 1. USDA FoodData Central (más preciso, diferencia crudo/cocido)
+        usda = await search_usda(food_name)
+        if usda:
+            kcal, protein, fat, carbs = usda['kcal'], usda['protein'], usda['fat'], usda['carbs']
+            source_note = f"_Fuente: USDA — {usda['source'][:55]}_"
+        else:
+            # 2. Fallback: estimación Claude (ya calculada en understand_intent)
+            kcal    = round(float(parsed.get('kcal',    0)), 1)
+            protein = round(float(parsed.get('protein', 0)), 1)
+            fat     = round(float(parsed.get('fat',     0)), 1)
+            carbs   = round(float(parsed.get('carbs',   0)), 1)
+            source_note = "_Valores estimados por Claude. Podés editarlos después desde la web._"
 
         context.user_data['pending_library_add'] = {
             'name': food_name, 'kcal': kcal, 'protein': protein,
@@ -312,7 +381,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📚 ¿Guardar en biblioteca?\n\n"
             f"*{food_name}* (por 100g)\n"
             f"{macros_line(kcal, protein, fat, carbs)}\n\n"
-            "_Valores estimados por Claude. Podés editarlos después desde la web._",
+            f"{source_note}",
             parse_mode='Markdown',
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
