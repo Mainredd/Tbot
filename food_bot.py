@@ -78,15 +78,23 @@ async def read_label_with_claude(image_bytes: bytes) -> dict | None:
         img_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
         resp = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=180,
+            max_tokens=400,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64}},
                 {"type": "text", "text":
-                    """Extraé la info nutricional de esta etiqueta. Devolvé SOLO JSON sin markdown:
-{"food_name":"nombre del producto","kcal":0,"protein":0,"fat":0,"carbs":0}
-- Todos los valores deben ser por 100g
-- Si los valores son por porción, convertí a per 100g
-- Solo JSON válido, sin texto extra"""
+                    """Analizá esta etiqueta nutricional argentina/latinoamericana. Seguí estos pasos:
+
+1. Identificá el nombre del producto.
+2. Buscá si hay una columna "por 100g" o "cada 100g" — si existe, usá ESE valor directamente.
+3. Si solo hay "por porción", identificá el tamaño de porción en gramos y convertí:
+   valor_100g = valor_porción × 100 / tamaño_porción_g
+4. Buscá: Calorías/Energía (kcal), Proteínas, Grasas totales, Hidratos/Carbohidratos.
+   Ignorá azúcares, fibra, sodio, grasas saturadas para el JSON.
+
+Devolvé SOLO este JSON sin markdown ni texto extra:
+{"food_name":"nombre","kcal":0,"protein":0,"fat":0,"carbs":0}
+
+Todos los valores deben ser por 100g. Solo números sin unidades."""
                 }
             ]}]
         )
@@ -108,17 +116,23 @@ async def estimate_macros_with_claude(food_name: str) -> dict | None:
         usda['estimated'] = False
         return usda
 
-    # 2. Fallback: Claude
+    # 2. Fallback: Claude (sonnet para mayor precisión nutricional)
     try:
         resp = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=150,
+            max_tokens=200,
             messages=[{"role": "user", "content":
-                f"""Usando tu conocimiento nutricional, estimá los macros por 100g de: "{food_name}"
-Sé muy preciso: si es crudo vs cocido, frito vs hervido, etc., los valores deben diferir correctamente.
-Devolvé SOLO JSON sin markdown:
+                f"""Sos un nutricionista experto. Estimá los macros por 100g de: "{food_name}"
+
+IMPORTANTE:
+- Crudo ≠ cocido: el pollo crudo tiene ~20g proteína, el cocido ~31g (pierde agua)
+- Frito ≠ hervido: frito tiene más grasa y calorías
+- Papa frita ≠ papa cocida: frita ~312 kcal, cocida ~87 kcal
+- Sé preciso según la preparación indicada
+
+Devolvé SOLO este JSON sin markdown:
 {{"kcal":0,"protein":0,"fat":0,"carbs":0}}
-Solo números, sin texto extra."""
+Solo números por 100g, sin texto extra."""
             }]
         )
         raw = resp.content[0].text.strip()
@@ -175,20 +189,27 @@ async def search_off(name: str) -> dict | None:
 # ── USDA FoodData Central ────────────────────────────────────────────────────
 
 async def search_usda(food_name_es: str) -> dict | None:
-    """Busca en USDA FoodData Central (Foundation + SR Legacy). Traduce al inglés con Claude."""
+    """Busca en USDA FoodData Central. Traduce al inglés y prioriza preparación exacta."""
     try:
         tr = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=60,
+            max_tokens=80,
             messages=[{"role": "user", "content":
-                f"Translate this Spanish food name to English for a USDA nutrition database. "
-                f"Be specific about preparation: raw/cooked/fried/boiled etc. "
-                f"Food: '{food_name_es}'. Reply with ONLY the English name."
+                f"Translate this Spanish food name to English for a USDA nutrition database search. "
+                f"Be very specific about preparation method (raw, cooked, fried, boiled, grilled, etc.). "
+                f"Also return 2-3 key words that must appear in the result to confirm it's correct. "
+                f"Food: '{food_name_es}'. "
+                f"Reply with ONLY JSON: {{\"query\":\"...\",\"keywords\":[\"...\",\"...\"]}}"
             }]
         )
-        english_name = tr.content[0].text.strip()
+        raw = tr.content[0].text.strip()
+        raw = re.sub(r'```json?\n?', '', raw).strip('`').strip()
+        tr_data = json.loads(raw)
+        english_name = tr_data.get("query", food_name_es)
+        keywords = [k.lower() for k in tr_data.get("keywords", [])]
     except Exception:
         english_name = food_name_es
+        keywords = []
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -198,7 +219,7 @@ async def search_usda(food_name_es: str) -> dict | None:
                     "query": english_name,
                     "api_key": "DEMO_KEY",
                     "dataType": "Foundation,SR Legacy",
-                    "pageSize": 5,
+                    "pageSize": 10,
                 }
             )
             data = resp.json()
@@ -206,19 +227,26 @@ async def search_usda(food_name_es: str) -> dict | None:
         logging.error(f"USDA search error: {e}")
         return None
 
-    for food in data.get("foods", []):
-        nutrients = {n["nutrientId"]: n["value"] for n in food.get("foodNutrients", [])}
-        kcal = float(nutrients.get(1008, 0))
-        if kcal <= 0:
-            continue
-        return {
-            "name":    food_name_es,
-            "kcal":    round(kcal, 1),
-            "protein": round(float(nutrients.get(1003, 0)), 1),
-            "fat":     round(float(nutrients.get(1004, 0)), 1),
-            "carbs":   round(float(nutrients.get(1005, 0)), 1),
-            "source":  food.get("description", english_name),
-        }
+    foods = data.get("foods", [])
+    # Primero intentar con coincidencia exacta de keywords de preparación
+    for strict in [True, False]:
+        for food in foods:
+            nutrients = {n["nutrientId"]: n["value"] for n in food.get("foodNutrients", [])}
+            kcal = float(nutrients.get(1008, 0))
+            if kcal <= 0:
+                continue
+            desc = food.get("description", "").lower()
+            if strict and keywords:
+                if not all(any(k in desc for k in [kw]) for kw in keywords[:2]):
+                    continue  # No coincide con la preparación → skip en primera pasada
+            return {
+                "name":    food_name_es,
+                "kcal":    round(kcal, 1),
+                "protein": round(float(nutrients.get(1003, 0)), 1),
+                "fat":     round(float(nutrients.get(1004, 0)), 1),
+                "carbs":   round(float(nutrients.get(1005, 0)), 1),
+                "source":  food.get("description", english_name),
+            }
     return None
 
 
