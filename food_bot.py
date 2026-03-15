@@ -94,53 +94,41 @@ async def read_label_with_claude(image_bytes: bytes) -> dict | None:
                 {"type": "text", "text":
                     """Analizá esta etiqueta nutricional argentina/latinoamericana.
 
-PASO 1 — Identificá el formato:
-  A) TABLA: tiene columnas claramente separadas (ej: "Cantidad por Porción | 100g | %VD")
-  B) PÁRRAFO/INLINE: la info nutricional está escrita como texto corrido, ej:
-     "Valor energético 137 kcal = 573 kJ (7% VD); Carbohidratos 13 g (4% VD); Proteínas 9 g..."
+PASO 1 — Formato:
+  A) TABLA: columnas "Cantidad por Porción | 100g | %VD"
+  B) PÁRRAFO/INLINE: texto corrido con ";" entre nutrientes
 
-PASO 2 — Tamaño de porción:
-  Buscá "Porción X g" o "Tamaño de la porción: X g" al comienzo del bloque nutricional.
-  Ese número X es el tamaño de porción. NO uses 100 si dice otro número.
-  Ejemplo: "Porción 180 g (1 vaso)" → portion_g = 180
+PASO 2 — Porción:
+  Buscá "Porción X g" o "Tamaño de la porción: X g".
+  Ese número es el portion_g. Ejemplo: "Porción 180 g (1 vaso)" → 180.
 
-PASO 3 — Leé los nutrientes por porción:
-  Para CADA nutriente, extraé el número que aparece JUSTO DESPUÉS del nombre del nutriente.
-  - Energía/Valor energético: si dice "137 kcal = 573 kJ" → kcal = 137 (el CHICO, nunca el kJ)
-  - Carbohidratos/Hidratos de carbono: el primer número en gramos de esa fila (NO azúcares)
-  - Proteínas: número en gramos de esa fila
-  - Grasas totales/Lípidos totales: buscá EXACTAMENTE el texto "Grasas totales" o "Lípidos totales".
-    El valor fat es el primer número después de esas palabras EXACTAS.
-    ⚠️ NUNCA uses el número de "Grasas saturadas", "Grasas trans", "Grasas mono" o "Grasas poli".
-    Ejemplo CORRECTO: "Grasas totales 5.4 g (10% VD); Grasas saturadas 3.3 g" → fat = 5.4
-    Ejemplo INCORRECTO: tomar 3.3 porque es el número más visible → fat = 3.3 ← ESTO ESTÁ MAL
+PASO 3 — Copiá textualmente (verbatim) los fragmentos que contienen cada nutriente:
+  - "portion_text": toda la línea/frase que dice el tamaño de porción
+  - "kcal_text": la parte que dice el valor energético. Ej: "Valor energético 137 kcal = 573 kJ"
+  - "carbs_text": la parte con carbohidratos. Ej: "Carbohidratos 13 g (4% VD)"
+  - "protein_text": la parte con proteínas. Ej: "Proteínas 9 g (12% VD)"
+  - "fat_text": la parte que empieza con "Grasas totales" o "Lípidos totales".
+    COPIÁ DESDE "Grasas totales" HASTA antes de "Grasas saturadas".
+    Ej: "Grasas totales 5.4 g (10% VD)"  — NO incluyas lo que sigue después.
+  - "fat_100g_text": si hay columna 100g, el valor de grasas totales en esa columna. Ej: "1 g"
 
-PASO 4 — Columna /100g:
-  Solo aplica para formato TABLA. Si existe columna "100g", leerla también.
-  Para formato PÁRRAFO: has_100g_col = false, por_100g todos en -1.
+PASO 4 — Columna /100g (solo TABLA):
+  Si hay columna 100g: has_100g_col = true y completá por_100g con los valores numéricos.
+  Si es PÁRRAFO: has_100g_col = false, por_100g todos -1.
 
-REGLAS:
-- Solo números sin unidades (9 no "9 g")
-- Separador decimal: punto
-- Si no se puede leer un valor: -1
-
-Devolvé SOLO este JSON, sin texto ni markdown:
+Devolvé SOLO este JSON sin markdown:
 {
-  "name": "nombre del producto o desconocido",
+  "name": "nombre o desconocido",
+  "portion_text": "Porción 180 g (1 vaso)",
   "portion_g": 180,
   "has_100g_col": false,
-  "por_porcion": {
-    "kcal": 137,
-    "carbs": 13,
-    "protein": 9,
-    "fat": 5.4
-  },
-  "por_100g": {
-    "kcal": -1,
-    "carbs": -1,
-    "protein": -1,
-    "fat": -1
-  }
+  "kcal_text": "Valor energético 137 kcal = 573 kJ (7% VD)",
+  "carbs_text": "Carbohidratos 13 g (4% VD)",
+  "protein_text": "Proteínas 9 g (12% VD)",
+  "fat_text": "Grasas totales 5.4 g (10% VD)",
+  "fat_100g_text": "",
+  "por_porcion": { "kcal": 137, "carbs": 13, "protein": 9, "fat": 5.4 },
+  "por_100g":    { "kcal": -1,  "carbs": -1, "protein": -1, "fat": -1 }
 }"""
                 }
             ]}]
@@ -187,6 +175,35 @@ Devolvé SOLO este JSON, sin texto ni markdown:
         protein = best('protein')
         fat     = best('fat')
 
+        # ── Extracción de grasas por regex sobre texto verbatim ──────────────
+        # Claude copia el texto crudo; Python extrae el número → evita confusión
+        # con Grasas saturadas/trans/mono/poli
+        def extract_fat_from_text(fat_text: str, fat_100g_text: str) -> float | None:
+            # Si hay columna 100g, extraer de fat_100g_text
+            for txt in [fat_100g_text, fat_text]:
+                if not txt:
+                    continue
+                # Busca el PRIMER número decimal o entero en el texto
+                m = re.search(r'(\d+[.,]\d+|\d+)\s*g?\b', txt)
+                if m:
+                    return float(m.group(1).replace(',', '.'))
+            return None
+
+        fat_text     = d.get('fat_text', '')
+        fat_100g_txt = d.get('fat_100g_text', '')
+
+        if has_col and fat_100g_txt:
+            fat_from_text = extract_fat_from_text('', fat_100g_txt)
+        else:
+            fat_from_text = extract_fat_from_text(fat_text, '')
+
+        if fat_from_text is not None and fat_from_text >= 0:
+            # Convertir a /100g si es necesario
+            if not has_col and portion > 0:
+                fat_from_text = round(fat_from_text * 100.0 / portion, 1)
+            logging.info(f"[fat_text] '{fat_text}' → fat={fat_from_text} (antes={fat})")
+            fat = fat_from_text
+
         # ── Sanity 1: si kcal < carbs → Claude confundió filas completas ──────
         if kcal > 0 and carbs > 0 and kcal < carbs and portion > 0:
             logging.warning(f"[Label sanity1] kcal({kcal}) < carbs({carbs}), recalculando desde porción")
@@ -196,11 +213,9 @@ Devolvé SOLO este JSON, sin texto ni markdown:
             fat     = round(safe(pp, 'fat')     * 100.0 / portion, 1) if safe(pp, 'fat') >= 0 else fat
 
         # ── Sanity 2: fórmula calórica 4P + 4C + 9F ≈ kcal ─────────────────
-        # Si las grasas reportadas son muy bajas, Claude leyó saturadas en vez de totales.
-        # Recalculo fat = (kcal - 4*protein - 4*carbs) / 9
         if kcal > 0 and protein >= 0 and carbs >= 0:
             calc_kcal = 4.0 * protein + 4.0 * carbs + 9.0 * fat
-            if calc_kcal > 0 and (kcal / calc_kcal) > 1.20:
+            if calc_kcal > 0 and (kcal / calc_kcal) > 1.15:
                 fat_corr = round((kcal - 4.0 * protein - 4.0 * carbs) / 9.0, 1)
                 if fat_corr > fat:
                     logging.warning(f"[Label sanity2] calc_kcal={calc_kcal:.1f} vs kcal={kcal:.1f} → fat {fat}→{fat_corr}")
