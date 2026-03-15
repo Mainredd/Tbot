@@ -92,28 +92,43 @@ async def read_label_with_claude(image_bytes: bytes) -> dict | None:
             messages=[{"role": "user", "content": [
                 img_block,
                 {"type": "text", "text":
-                    """Leé esta etiqueta nutricional con máxima precisión. Necesito:
+                    """Leé esta etiqueta nutricional. Seguí cada instrucción al pie de la letra.
 
-A) Nombre del producto (si no se ve, "desconocido")
-B) Tamaño de porción en gramos (buscá "Porción:" o "Tamaño de la porción:")
-C) Si existe columna "100g" o "cada 100g" separada → has_100g=si, sino has_100g=no
-D) Valores numéricos de: energía en KCAL, carbohidratos, proteínas, grasas TOTALES
-   - Energía: si dice "171 kcal=715 kJ" → el kcal es 171 (el número CHICO, NO el kJ)
-   - Grasas totales: NO confundir con grasas saturadas
-   - Si hay columna 100g: leé los valores de ESA columna también
+REGLAS GENERALES:
+- Devolvé SOLO números (sin g, sin kcal, sin %, sin texto). Ejemplo correcto: 7.4  Incorrecto: 7.4g
+- Si un valor no se puede leer claramente, devolvé -1
+- Separador decimal: punto (7.4 no 7,4)
 
-Respondé ÚNICAMENTE en este formato (una clave por línea, sin texto extra):
-name=<nombre>
-portion_g=<número>
-has_100g=<si o no>
-kcal_porcion=<número o -1 si no se ve>
-carbs_porcion=<número o -1>
-protein_porcion=<número o -1>
-fat_porcion=<número o -1>
-kcal_100g=<número o -1 si no hay columna 100g>
-carbs_100g=<número o -1>
-protein_100g=<número o -1>
-fat_100g=<número o -1>"""
+PASO 1 - Nombre:
+  Buscá el nombre del producto en el envase. Si no se ve, devolvé "desconocido".
+
+PASO 2 - Porción:
+  Buscá "Porción:" o "Tamaño de la porción:" y anotá el número en gramos.
+  Ejemplo: "Porción: 50 g (1/4 taza)" → portion_g=50
+
+PASO 3 - Columna /100g:
+  ¿Existe una columna con encabezado "100g" o "cada 100g"? → has_100g=si o no
+
+PASO 4 - Nutrientes (IMPORTANTE: leé CADA fila de la tabla):
+  Para CADA nutriente, buscá el valor en la columna "por porción" Y en la columna "100g".
+  - Energía/Valor energético: usá SOLO el valor en KCAL (el número más chico).
+    Si dice "171 kcal=715 kJ" → kcal=171. NUNCA uses el kJ.
+  - Carbohidratos/Hidratos de carbono TOTALES (no azúcares)
+  - Proteínas
+  - Grasas TOTALES (no saturadas, no trans, no monoinsaturadas)
+
+Respondé SOLO con estas líneas, sin texto adicional:
+name=
+portion_g=
+has_100g=
+kcal_porcion=
+carbs_porcion=
+protein_porcion=
+fat_porcion=
+kcal_100g=
+carbs_100g=
+protein_100g=
+fat_100g="""
                 }
             ]}]
         )
@@ -133,8 +148,17 @@ fat_100g=<número o -1>"""
                 kv[k.strip().lower()] = v.strip()
 
         def fv(key: str, default: float = -1.0) -> float:
+            raw = kv.get(key, '').strip()
+            if not raw:
+                return default
+            # Eliminar unidades y caracteres no numéricos (g, kcal, kJ, espacios, etc.)
+            # Conservar dígitos, punto y coma decimal, y signo negativo
+            cleaned = re.sub(r'[^\d.,-]', '', raw).replace(',', '.')
+            # Si quedó vacío o es solo puntos, usar default
+            if not cleaned or cleaned in ('.', '-', '-.'):
+                return default
             try:
-                return float(kv.get(key, str(default)).replace(',', '.'))
+                return float(cleaned)
             except ValueError:
                 return default
 
@@ -146,10 +170,13 @@ fat_100g=<número o -1>"""
             """Usa columna /100g si existe y es válida; sino convierte desde porción."""
             v100 = fv(k100)
             vp   = fv(kp)
+            # Columna 100g leída y válida → usarla directo
             if has_100g and v100 >= 0:
                 return round(v100, 1)
+            # Porción disponible → convertir
             if vp >= 0 and portion_g > 0:
                 return round(vp * 100.0 / portion_g, 1)
+            # Columna 100g disponible aunque has_100g no se detectó bien
             if v100 >= 0:
                 return round(v100, 1)
             return 0.0
