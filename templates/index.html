@@ -200,6 +200,13 @@
       text-align: left; padding: 10px 14px; font-size: 0.75rem;
       color: var(--muted); border-bottom: 1px solid var(--border); font-weight: 500;
     }
+    .food-table th.sortable {
+      cursor: pointer; user-select: none;
+    }
+    .food-table th.sortable:hover { color: var(--text); }
+    .food-table th .sort-arrow { margin-left: 4px; opacity: 0.4; font-size: 0.7rem; }
+    .food-table th.sort-asc .sort-arrow,
+    .food-table th.sort-desc .sort-arrow { opacity: 1; color: var(--accent); }
     .food-table td {
       padding: 10px 14px; font-size: 0.83rem; border-bottom: 1px solid rgba(255,255,255,0.04);
     }
@@ -711,11 +718,11 @@
       <table class="food-table" id="food-table">
         <thead>
           <tr>
-            <th>Alimento</th>
-            <th>Kcal / <span id="lib-qty-label">100g</span></th>
-            <th>Prot / <span class="lib-qty-label-ref">100g</span></th>
-            <th>Grasas / <span class="lib-qty-label-ref">100g</span></th>
-            <th>Carbos / <span class="lib-qty-label-ref">100g</span></th>
+            <th class="sortable" onclick="sortFoods('name')" data-col="name">Alimento <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortFoods('kcal')" data-col="kcal">Kcal / <span id="lib-qty-label">100g</span> <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortFoods('prot')" data-col="prot">Prot / <span class="lib-qty-label-ref">100g</span> <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortFoods('fat')"  data-col="fat">Grasas / <span class="lib-qty-label-ref">100g</span> <span class="sort-arrow">↕</span></th>
+            <th class="sortable" onclick="sortFoods('carbs')" data-col="carbs">Carbos / <span class="lib-qty-label-ref">100g</span> <span class="sort-arrow">↕</span></th>
             <th></th>
           </tr>
         </thead>
@@ -1289,6 +1296,39 @@
   }
 
   // ── Biblioteca ────────────────────────────────────────────────────────────
+  let _foodSortCol = null, _foodSortAsc = true;
+
+  function sortFoods(col) {
+    const tbody = document.getElementById('food-table-body');
+    const rows  = Array.from(tbody.querySelectorAll('tr'));
+
+    if (_foodSortCol === col) {
+      _foodSortAsc = !_foodSortAsc;
+    } else {
+      _foodSortCol = col;
+      _foodSortAsc = true;
+    }
+
+    rows.sort((a, b) => {
+      let va = col === 'name' ? a.dataset.name : parseFloat(a.dataset[col] ?? 0);
+      let vb = col === 'name' ? b.dataset.name : parseFloat(b.dataset[col] ?? 0);
+      if (col === 'name') return _foodSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      return _foodSortAsc ? va - vb : vb - va;
+    });
+
+    rows.forEach(r => tbody.appendChild(r));
+
+    // Actualizar flechas en headers
+    document.querySelectorAll('.food-table th.sortable').forEach(th => {
+      th.classList.remove('sort-asc', 'sort-desc');
+      th.querySelector('.sort-arrow').textContent = '↕';
+      if (th.dataset.col === col) {
+        th.classList.add(_foodSortAsc ? 'sort-asc' : 'sort-desc');
+        th.querySelector('.sort-arrow').textContent = _foodSortAsc ? '↑' : '↓';
+      }
+    });
+  }
+
   function filterFoods() {
     const q = document.getElementById('food-search').value.toLowerCase();
     document.querySelectorAll('#food-table-body tr').forEach(row => {
