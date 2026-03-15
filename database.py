@@ -323,13 +323,33 @@ def get_food_by_name(name: str):
             if row:
                 return _food_row(row)
 
-        # 5. Cada palabra significativa del query ("pollo asado" → busca "pollo", "avena quaker" → busca "avena")
+        # 5. Para frases multi-palabra: todas las palabras deben estar (AND)
         words = [w for w in q.split() if len(w) > 3]
-        for word in words:
+        if len(words) > 1:
+            # Construir variantes singulares
+            def variants(w):
+                v = [w]
+                if w.endswith('s') and len(w) > 4:
+                    v.append(w[:-1])
+                if w.endswith('es') and len(w) > 5:
+                    v.append(w[:-2])
+                return v
+
+            # Buscar nombre que contenga TODAS las palabras (o sus singulares)
+            all_foods = conn.execute(
+                'SELECT id, name, kcal, protein, fat, carbs FROM foods'
+            ).fetchall()
+            for food_row in all_foods:
+                fname = food_row[1].lower()
+                if all(any(v in fname for v in variants(w)) for w in words):
+                    return _food_row(food_row)
+
+        # 6. Fallback: solo la primera palabra significativa (último recurso)
+        if words:
+            word = words[0]
             row = search(f'%{word}%')
             if row:
                 return _food_row(row)
-            # También probar singular de cada palabra
             if word.endswith('s') and len(word) > 4:
                 row = search(f'%{word[:-1]}%')
                 if row:

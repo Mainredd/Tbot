@@ -98,6 +98,36 @@ async def read_label_with_claude(image_bytes: bytes) -> dict | None:
         return None
 
 
+# ── Claude: estimar macros de un alimento desconocido ────────────────────────
+
+async def estimate_macros_with_claude(food_name: str) -> dict | None:
+    try:
+        resp = await ai.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            messages=[{"role": "user", "content":
+                f"""Usando tu conocimiento nutricional, estimá los macros por 100g de: "{food_name}"
+Devolvé SOLO JSON sin markdown:
+{{"kcal":0,"protein":0,"fat":0,"carbs":0}}
+Solo números, sin texto extra."""
+            }]
+        )
+        raw = resp.content[0].text.strip()
+        raw = re.sub(r'```json?\n?', '', raw).strip('`').strip()
+        data = json.loads(raw)
+        return {
+            "name":    food_name,
+            "kcal":    round(float(data.get("kcal",    0)), 1),
+            "protein": round(float(data.get("protein", 0)), 1),
+            "fat":     round(float(data.get("fat",     0)), 1),
+            "carbs":   round(float(data.get("carbs",   0)), 1),
+            "estimated": True,
+        }
+    except Exception as e:
+        logging.error(f"Claude estimate error: {e}")
+    return None
+
+
 # ── Open Food Facts ───────────────────────────────────────────────────────────
 
 async def search_off(name: str) -> dict | None:
@@ -329,7 +359,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logged.append({'name': off['name'], 'qty': qty, 'kcal': kcal,
                            'protein': protein, 'fat': fat, 'carbs': carbs, 'meal_type': meal_type})
         else:
-            not_found.append({'name': food_name, 'qty': qty})
+            # Fallback: Claude estima macros
+            est = await estimate_macros_with_claude(food_name)
+            if est:
+                kcal, protein, fat, carbs = calc_macros(est, qty)
+                db.log_food_with_date(user_id, food_name, qty, kcal, protein, fat, carbs, meal_type, today_ar)
+                logged.append({'name': food_name, 'qty': qty, 'kcal': kcal,
+                               'protein': protein, 'fat': fat, 'carbs': carbs,
+                               'meal_type': meal_type, 'estimated': True})
+            else:
+                not_found.append({'name': food_name, 'qty': qty})
 
     # ── Respuesta ─────────────────────────────────────────────────────────────
     if not logged and not not_found:
@@ -340,9 +379,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(logged) == 1 and not not_found and len(items) == 1:
         l = logged[0]
         emoji = MEAL_EMOJIS.get(l['meal_type'], '🍽')
+        est_note = "\n_~valores estimados por IA_" if l.get('estimated') else ""
         await thinking.edit_text(
             f"{emoji} *{l['name']}* — {l['qty']:.0f}g\n"
-            f"{macros_line(l['kcal'], l['protein'], l['fat'], l['carbs'])}",
+            f"{macros_line(l['kcal'], l['protein'], l['fat'], l['carbs'])}{est_note}",
             parse_mode='Markdown'
         )
         return
@@ -354,7 +394,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for l in logged:
         emoji = MEAL_EMOJIS.get(l['meal_type'], '🍽')
-        lines.append(f"{emoji} *{l['name']}* {l['qty']:.0f}g — {l['kcal']:.0f} kcal")
+        est_tag = " _(~estimado)_" if l.get('estimated') else ""
+        lines.append(f"{emoji} *{l['name']}* {l['qty']:.0f}g — {l['kcal']:.0f} kcal{est_tag}")
 
     if not_found:
         lines.append("")
