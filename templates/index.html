@@ -286,6 +286,106 @@
       display: flex; align-items: center; gap: 8px; color: var(--text);
     }
 
+    /* ── Exercise Library ── */
+    .exlib-filters { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+    .exlib-filter {
+      padding: 7px 16px; border-radius: 20px; cursor: pointer;
+      font-size: 0.82rem; font-weight: 600;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--muted); transition: all 0.15s;
+    }
+    .exlib-filter:hover { color: var(--text); border-color: #444; }
+    .exlib-filter.active { color: #000; background: var(--accent); border-color: var(--accent); }
+
+    .exlib-category-title {
+      font-size: 0.95rem; font-weight: 700; margin: 24px 0 12px;
+      display: flex; align-items: center; gap: 8px;
+      padding-bottom: 8px; border-bottom: 1px solid var(--border);
+    }
+    .exlib-category-title:first-of-type { margin-top: 0; }
+
+    .exlib-grid { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+
+    .exlib-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden; transition: border-color 0.15s;
+    }
+    .exlib-card:hover { border-color: #444; }
+    .exlib-card-head {
+      padding: 14px 18px; display: flex; align-items: center;
+      justify-content: space-between; cursor: pointer; user-select: none;
+    }
+    .exlib-card-head:hover { background: rgba(255,255,255,0.02); }
+    .exlib-card-left { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+    .exlib-card-name { font-size: 0.9rem; font-weight: 600; }
+    .exlib-card-muscles {
+      font-size: 0.72rem; color: var(--muted); margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .exlib-badges { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+    .exlib-badge {
+      font-size: 0.68rem; padding: 2px 8px; border-radius: 10px;
+      font-weight: 600; white-space: nowrap;
+    }
+    .exlib-badge-diff { background: rgba(255,255,255,0.06); }
+    .exlib-badge-sets {
+      background: rgba(200,255,0,0.08); color: var(--accent);
+      border: 1px solid rgba(200,255,0,0.15);
+    }
+    .exlib-chevron {
+      color: var(--muted); font-size: 0.75rem; transition: transform 0.2s;
+      margin-left: 8px;
+    }
+    .exlib-card.open .exlib-chevron { transform: rotate(90deg); }
+
+    .exlib-card-body { display: none; border-top: 1px solid var(--border); }
+    .exlib-card.open .exlib-card-body { display: block; }
+
+    .exlib-body-content { padding: 18px; }
+    .exlib-desc {
+      font-size: 0.84rem; color: var(--text); line-height: 1.5;
+      margin-bottom: 14px; opacity: 0.9;
+    }
+    .exlib-section-title {
+      font-size: 0.76rem; font-weight: 700; color: var(--accent);
+      text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+    }
+    .exlib-tips { list-style: none; padding: 0; margin: 0 0 16px; }
+    .exlib-tips li {
+      font-size: 0.8rem; color: var(--text); opacity: 0.85;
+      padding: 4px 0 4px 18px; position: relative; line-height: 1.4;
+    }
+    .exlib-tips li::before {
+      content: '→'; position: absolute; left: 0; color: var(--accent); font-weight: 700;
+    }
+    .exlib-equipment {
+      display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .exlib-equip-item {
+      font-size: 0.78rem; color: var(--muted);
+      display: flex; align-items: center; gap: 5px;
+    }
+
+    .exlib-video-wrap {
+      margin-top: 12px; border-radius: 10px; overflow: hidden;
+      background: #0a0a0a; border: 1px solid var(--border);
+    }
+    .exlib-video-placeholder {
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 8px; padding: 24px;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .exlib-video-placeholder:hover { background: rgba(255,255,255,0.03); }
+    .exlib-video-placeholder span {
+      font-size: 0.82rem; color: var(--muted);
+    }
+    .exlib-video-placeholder .play-icon {
+      font-size: 2rem; color: #ff0000;
+    }
+    .exlib-video-wrap iframe {
+      width: 100%; aspect-ratio: 16/9; border: none; display: block;
+    }
+
     @media (max-width: 600px) {
       main { padding: 16px; }
       header { padding: 14px 16px; }
@@ -312,6 +412,7 @@
     <div class="tab"         onclick="showPanel('prs',       this)">🏆 Records</div>
     <div class="tab"         onclick="showPanel('comidas',   this)">🍽 Comidas</div>
     <div class="tab"         onclick="showPanel('biblioteca',this)">📚 Biblioteca</div>
+    <div class="tab"         onclick="showPanel('ejercicios',this)">📖 Ejercicios</div>
   </div>
 
   <!-- ══════════════════ SESIONES ══════════════════ -->
@@ -510,6 +611,87 @@
       <canvas id="weekChart" height="90"></canvas>
     </div>
     {% endif %}
+  </div>
+
+  <!-- ══════════════════ EJERCICIOS (LIBRERÍA) ══════════════════ -->
+  <div class="panel" id="panel-ejercicios">
+    <div class="exlib-filters">
+      <div class="exlib-filter active" onclick="filterExercises('all', this)">Todos</div>
+      {% for cat_key, cat in category_info.items() %}
+      <div class="exlib-filter" onclick="filterExercises('{{ cat_key }}', this)">{{ cat.emoji }} {{ cat_key | upper }}</div>
+      {% endfor %}
+    </div>
+
+    {% for cat_key, cat in category_info.items() %}
+    <div class="exlib-category" data-cat="{{ cat_key }}">
+      <div class="exlib-category-title" style="color: {{ cat.color }}">
+        <span>{{ cat.emoji }}</span> {{ cat.title }}
+      </div>
+      <div class="exlib-grid">
+        {% for ex_name, ex in exercise_library.items() %}
+        {% if ex.category == cat_key %}
+        {% set workout_ex = None %}
+        {% for w_key, w_val in workouts.items() %}
+          {% if w_key == cat_key %}
+            {% for we in w_val.exercises %}
+              {% if we.name == ex_name %}
+                {% set workout_ex = we %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+        <div class="exlib-card" onclick="toggleExCard(this, event)">
+          <div class="exlib-card-head">
+            <div class="exlib-card-left">
+              <div>
+                <div class="exlib-card-name">{{ ex_name }}</div>
+                <div class="exlib-card-muscles">{{ ex.muscles | join(' · ') }}</div>
+              </div>
+            </div>
+            <div class="exlib-badges">
+              <span class="exlib-badge exlib-badge-diff" style="color: {{ difficulty_colors.get(ex.difficulty, '#999') }}">{{ ex.difficulty }}</span>
+              {% for w_key, w_val in workouts.items() %}
+                {% if w_key == cat_key %}
+                  {% for we in w_val.exercises %}
+                    {% if we.name == ex_name %}
+              <span class="exlib-badge exlib-badge-sets">{{ we.sets }}×{{ we.reps }}</span>
+                    {% endif %}
+                  {% endfor %}
+                {% endif %}
+              {% endfor %}
+              <span class="exlib-chevron">▶</span>
+            </div>
+          </div>
+          <div class="exlib-card-body">
+            <div class="exlib-body-content">
+              <div class="exlib-desc">{{ ex.description }}</div>
+
+              <div class="exlib-equipment">
+                <div class="exlib-equip-item">🔧 {{ ex.equipment }}</div>
+              </div>
+
+              <div class="exlib-section-title">Tips clave</div>
+              <ul class="exlib-tips">
+                {% for tip in ex.tips %}
+                <li>{{ tip }}</li>
+                {% endfor %}
+              </ul>
+
+              <div class="exlib-section-title">Video demostrativo</div>
+              <div class="exlib-video-wrap">
+                <div class="exlib-video-placeholder" onclick="loadExVideo(this, '{{ ex.video_query }}'); event.stopPropagation();">
+                  <span class="play-icon">▶</span>
+                  <span>Click para ver video</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
   </div>
 
   <!-- ══════════════════ BIBLIOTECA ══════════════════ -->
@@ -760,7 +942,7 @@
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById('panel-' + name).classList.add('active');
     tab.classList.add('active');
-    const btnLabel = { sesiones:'+ Nueva sesión', prs:'', comidas:'+ Registrar comida', biblioteca:'+ Nuevo alimento' };
+    const btnLabel = { sesiones:'+ Nueva sesión', prs:'', comidas:'+ Registrar comida', biblioteca:'+ Nuevo alimento', ejercicios:'' };
     const btn = document.getElementById('btn-new-action');
     btn.textContent = btnLabel[name] || '+ Nuevo';
     btn.style.display = btnLabel[name] ? '' : 'none';
@@ -1223,6 +1405,34 @@
         }
       }
     });
+  }
+
+  // ── Ejercicios: librería ─────────────────────────────────────────────────
+  function toggleExCard(card, event) {
+    // No toggle si se hizo click en el video
+    if (event.target.closest('.exlib-video-wrap')) return;
+    card.classList.toggle('open');
+  }
+
+  function filterExercises(cat, btn) {
+    document.querySelectorAll('.exlib-filter').forEach(f => f.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.exlib-category').forEach(el => {
+      el.style.display = (cat === 'all' || el.dataset.cat === cat) ? '' : 'none';
+    });
+  }
+
+  function loadExVideo(placeholder, query) {
+    const wrap = placeholder.parentElement;
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query + ' short form tutorial')}`;
+    // Abre YouTube en nueva pestaña con la búsqueda
+    window.open(searchUrl, '_blank');
+    // Cambia el placeholder a un link
+    wrap.innerHTML = `<div style="text-align:center;padding:18px;">
+        <a href="${searchUrl}" target="_blank" rel="noopener" style="color:var(--accent);font-size:0.84rem;text-decoration:none;display:flex;align-items:center;justify-content:center;gap:8px;">
+          <span style="font-size:1.4rem;">▶</span> Ver video en YouTube
+        </a>
+      </div>`;
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────

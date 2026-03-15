@@ -14,6 +14,7 @@ from database import (
     get_food_week_summary,
 )
 from exercises import WORKOUTS
+from exercise_library import EXERCISE_LIBRARY, CATEGORY_INFO, DIFFICULTY_COLORS
 
 app = Flask(__name__)
 
@@ -95,7 +96,10 @@ def index():
     exercises_by_day = {k: [e['name'] for e in v['exercises']] for k, v in WORKOUTS.items()}
     foods = get_all_foods()
     return render_template('index.html', users=user_data, workouts=WORKOUTS,
-                           exercises_by_day=exercises_by_day, foods=foods)
+                           exercises_by_day=exercises_by_day, foods=foods,
+                           exercise_library=EXERCISE_LIBRARY,
+                           category_info=CATEGORY_INFO,
+                           difficulty_colors=DIFFICULTY_COLORS)
 
 
 # ── API Gym ───────────────────────────────────────────────────────────────────
