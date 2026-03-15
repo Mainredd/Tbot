@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -238,42 +239,51 @@ Devolvé SOLO este JSON sin markdown:
 # ── Claude: estimar macros de un alimento desconocido ────────────────────────
 
 async def estimate_macros_with_claude(food_name: str) -> dict | None:
-    """Primero intenta USDA; si falla, estima con Claude."""
-    # 1. USDA (preciso)
-    usda = await search_usda(food_name)
-    if usda:
-        usda['estimated'] = False
-        return usda
+    """
+    Promedia múltiples fuentes online (USDA + OFF) para mayor precisión.
+    Solo usa estimación de Claude como último recurso.
+    """
+    # 1. Buscar en USDA y OFF en paralelo
+    usda_results, off_results = await asyncio.gather(
+        search_usda_multi(food_name),
+        search_off_multi(food_name),
+    )
 
-    # 2. Fallback: Claude (sonnet para mayor precisión nutricional)
+    all_results = usda_results + off_results
+    if all_results:
+        avg = _average_results(all_results)
+        n_usda = len(usda_results)
+        n_off  = len(off_results)
+        source_tag = f"promedio {n_usda} USDA + {n_off} OFF" if n_off else f"promedio {n_usda} USDA"
+        logging.info(f"[estimate] '{food_name}' → {source_tag}: {avg}")
+        return {
+            "name":      food_name,
+            "source":    source_tag,
+            "estimated": False,
+            **avg,
+        }
+
+    # 2. Fallback: Claude como último recurso
+    logging.warning(f"[estimate] Sin datos online para '{food_name}', usando Claude")
     try:
         resp = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=200,
             messages=[{"role": "user", "content":
                 f"""Sos un nutricionista experto. Estimá los macros por 100g de: "{food_name}"
-
-IMPORTANTE:
-- Crudo ≠ cocido: el pollo crudo tiene ~20g proteína, el cocido ~31g (pierde agua)
-- Frito ≠ hervido: frito tiene más grasa y calorías
-- Papa frita ≠ papa cocida: frita ~312 kcal, cocida ~87 kcal
-- Sé preciso según la preparación indicada
-
-Devolvé SOLO este JSON sin markdown:
-{{"kcal":0,"protein":0,"fat":0,"carbs":0}}
-Solo números por 100g, sin texto extra."""
+Crudo ≠ cocido (pollo crudo ~20g prot, cocido ~31g). Frito tiene más grasa.
+Devolvé SOLO JSON: {{"kcal":0,"protein":0,"fat":0,"carbs":0}}"""
             }]
         )
         raw = resp.content[0].text.strip()
         raw = re.sub(r'```json?\n?', '', raw).strip('`').strip()
         data = json.loads(raw)
         return {
-            "name":    food_name,
+            "name": food_name, "estimated": True,
             "kcal":    round(float(data.get("kcal",    0)), 1),
             "protein": round(float(data.get("protein", 0)), 1),
             "fat":     round(float(data.get("fat",     0)), 1),
             "carbs":   round(float(data.get("carbs",   0)), 1),
-            "estimated": True,
         }
     except Exception as e:
         logging.error(f"Claude estimate error: {e}")
@@ -283,52 +293,28 @@ Solo números por 100g, sin texto extra."""
 # ── Open Food Facts ───────────────────────────────────────────────────────────
 
 async def search_off(name: str) -> dict | None:
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(
-                "https://world.openfoodfacts.org/cgi/search.pl",
-                params={
-                    "search_terms": name, "search_simple": 1,
-                    "action": "process", "json": 1, "page_size": 5,
-                    "fields": "product_name,nutriments",
-                }
-            )
-            query_words = [w for w in name.lower().split() if len(w) > 2]
-            for product in resp.json().get("products", []):
-                n = product.get("nutriments", {})
-                kcal = n.get("energy-kcal_100g") or n.get("energy_100g", 0)
-                if not kcal or float(kcal) <= 0:
-                    continue
-                pname = (product.get("product_name") or "").lower()
-                # Validar relevancia: al menos 1 palabra del query debe estar en el nombre
-                if not any(w in pname for w in query_words):
-                    continue
-                return {
-                    "name":    product.get("product_name", name),
-                    "kcal":    round(float(kcal), 1),
-                    "protein": round(float(n.get("proteins_100g",       0)), 1),
-                    "fat":     round(float(n.get("fat_100g",            0)), 1),
-                    "carbs":   round(float(n.get("carbohydrates_100g",  0)), 1),
-                }
-    except Exception as e:
-        logging.error(f"OFF search error: {e}")
-    return None
+    """Promedia múltiples resultados relevantes de Open Food Facts."""
+    results = await search_off_multi(name)
+    if not results:
+        return None
+    avg = _average_results(results)
+    return {"name": name, **avg}
 
 
 # ── USDA FoodData Central ────────────────────────────────────────────────────
 
-async def search_usda(food_name_es: str) -> dict | None:
-    """Busca en USDA FoodData Central. Traduce al inglés y prioriza preparación exacta."""
+async def search_usda_multi(food_name_es: str) -> list[dict]:
+    """Devuelve todos los resultados relevantes de USDA (hasta 8), para promediar."""
     try:
         tr = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=80,
             messages=[{"role": "user", "content":
-                f"Translate this Spanish food name to English for a USDA nutrition database search. "
-                f"Be very specific about preparation method (raw, cooked, fried, boiled, grilled, etc.). "
-                f"Also return 2-3 key words that must appear in the result to confirm it's correct. "
+                f"Translate this Spanish food name to English for USDA nutrition database. "
+                f"Be specific about preparation (raw, cooked, fried, etc.). "
+                f"Return 1-3 keywords that MUST appear in matching results. "
                 f"Food: '{food_name_es}'. "
-                f"Reply with ONLY JSON: {{\"query\":\"...\",\"keywords\":[\"...\",\"...\"]}}"
+                f"Reply ONLY JSON: {{\"query\":\"...\",\"keywords\":[\"...\"]}}"
             }]
         )
         raw = tr.content[0].text.strip()
@@ -348,49 +334,111 @@ async def search_usda(food_name_es: str) -> dict | None:
                     "query": english_name,
                     "api_key": "DEMO_KEY",
                     "dataType": "Foundation,SR Legacy",
-                    "pageSize": 10,
+                    "pageSize": 20,
                 }
             )
-            data = resp.json()
+            foods = resp.json().get("foods", [])
     except Exception as e:
         logging.error(f"USDA search error: {e}")
-        return None
+        return []
 
-    foods = data.get("foods", [])
     query_words = [w for w in english_name.lower().split() if len(w) > 3]
+    results = []
 
-    # Pasada 1 (strict): todos los keywords deben estar en la descripción
-    # Pasada 2 (loose):  al menos UNA palabra del query debe estar en la descripción
-    # Sin ninguna coincidencia de palabras → devolver None para evitar resultados irrelevantes
-    for strict in [True, False]:
-        for food in foods:
-            nutrients = {n["nutrientId"]: n["value"] for n in food.get("foodNutrients", [])}
-            kcal = float(nutrients.get(1008, 0))
-            if kcal <= 0:
+    for food in foods:
+        desc = food.get("description", "").lower()
+        # Al menos una keyword principal debe estar en el nombre
+        if query_words and not any(w in desc for w in query_words):
+            continue
+        nutrients = {n["nutrientId"]: n["value"] for n in food.get("foodNutrients", [])}
+        kcal = float(nutrients.get(1008, 0))
+        if kcal <= 0:
+            continue
+        results.append({
+            "source":  food.get("description", english_name),
+            "kcal":    kcal,
+            "protein": float(nutrients.get(1003, 0)),
+            "fat":     float(nutrients.get(1004, 0)),
+            "carbs":   float(nutrients.get(1005, 0)),
+        })
+        if len(results) >= 8:
+            break
+
+    logging.info(f"[USDA] '{english_name}' → {len(results)} resultados relevantes: {[r['source'][:30] for r in results]}")
+    return results
+
+
+async def search_off_multi(name: str) -> list[dict]:
+    """Devuelve todos los resultados relevantes de Open Food Facts (hasta 6)."""
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(
+                "https://world.openfoodfacts.org/cgi/search.pl",
+                params={
+                    "search_terms": name, "search_simple": 1,
+                    "action": "process", "json": 1, "page_size": 15,
+                    "fields": "product_name,nutriments",
+                }
+            )
+        query_words = [w for w in name.lower().split() if len(w) > 2]
+        results = []
+        for product in resp.json().get("products", []):
+            n = product.get("nutriments", {})
+            kcal = n.get("energy-kcal_100g") or n.get("energy_100g", 0)
+            if not kcal or float(kcal) <= 0:
                 continue
-            desc = food.get("description", "").lower()
+            pname = (product.get("product_name") or "").lower()
+            if not any(w in pname for w in query_words):
+                continue
+            results.append({
+                "source":  product.get("product_name", name),
+                "kcal":    float(kcal),
+                "protein": float(n.get("proteins_100g",      0)),
+                "fat":     float(n.get("fat_100g",           0)),
+                "carbs":   float(n.get("carbohydrates_100g", 0)),
+            })
+            if len(results) >= 6:
+                break
+        logging.info(f"[OFF] '{name}' → {len(results)} resultados")
+        return results
+    except Exception as e:
+        logging.error(f"OFF multi search error: {e}")
+        return []
 
-            if strict:
-                # Todas las keywords de preparación deben coincidir
-                if keywords and not all(kw in desc for kw in keywords[:2]):
-                    continue
-                # Además, al menos una palabra del query debe estar presente
-                if query_words and not any(w in desc for w in query_words):
-                    continue
-            else:
-                # Mínimo: al menos una palabra del query debe aparecer en la descripción
-                if query_words and not any(w in desc for w in query_words):
-                    continue
 
-            return {
-                "name":    food_name_es,
-                "kcal":    round(kcal, 1),
-                "protein": round(float(nutrients.get(1003, 0)), 1),
-                "fat":     round(float(nutrients.get(1004, 0)), 1),
-                "carbs":   round(float(nutrients.get(1005, 0)), 1),
-                "source":  food.get("description", english_name),
+def _average_results(results: list[dict]) -> dict:
+    """Promedia una lista de resultados nutricionales (outlier filtering incluido)."""
+    if not results:
+        return {}
+    n = len(results)
+    avg = {
+        "kcal":    sum(r["kcal"]    for r in results) / n,
+        "protein": sum(r["protein"] for r in results) / n,
+        "fat":     sum(r["fat"]     for r in results) / n,
+        "carbs":   sum(r["carbs"]   for r in results) / n,
+    }
+    # Filtrar outliers: descartar valores > 2× el promedio en kcal
+    if n > 2:
+        filtered = [r for r in results if abs(r["kcal"] - avg["kcal"]) < avg["kcal"] * 0.8]
+        if len(filtered) >= 2:
+            n2 = len(filtered)
+            avg = {
+                "kcal":    sum(r["kcal"]    for r in filtered) / n2,
+                "protein": sum(r["protein"] for r in filtered) / n2,
+                "fat":     sum(r["fat"]     for r in filtered) / n2,
+                "carbs":   sum(r["carbs"]   for r in filtered) / n2,
             }
-    return None
+    return {k: round(v, 1) for k, v in avg.items()}
+
+
+async def search_usda(food_name_es: str) -> dict | None:
+    """Busca en USDA y promedia resultados relevantes."""
+    results = await search_usda_multi(food_name_es)
+    if not results:
+        return None
+    avg = _average_results(results)
+    sources = ", ".join(r["source"][:25] for r in results[:3])
+    return {"name": food_name_es, **avg, "source": sources}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
