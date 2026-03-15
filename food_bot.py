@@ -92,39 +92,52 @@ async def read_label_with_claude(image_bytes: bytes) -> dict | None:
             messages=[{"role": "user", "content": [
                 img_block,
                 {"type": "text", "text":
-                    """Analizá esta etiqueta nutricional argentina/latinoamericana con máxima precisión.
+                    """Analizá esta etiqueta nutricional argentina/latinoamericana.
 
-La tabla tiene filas (nutrientes) y columnas (por porción, y a veces por 100g).
-Tu tarea es leer CADA fila y CADA columna correctamente.
+PASO 1 — Identificá el formato:
+  A) TABLA: tiene columnas claramente separadas (ej: "Cantidad por Porción | 100g | %VD")
+  B) PÁRRAFO/INLINE: la info nutricional está escrita como texto corrido, ej:
+     "Valor energético 137 kcal = 573 kJ (7% VD); Carbohidratos 13 g (4% VD); Proteínas 9 g..."
 
-INSTRUCCIONES CRÍTICAS:
-1. La fila "Valor energético" puede decir "171 kcal=715 kJ". El KCAL es el número CHICO (171). NUNCA confundas kJ con kcal.
-2. Lee la fila "Proteínas" con cuidado. Es distinta a "Carbohidratos". Suelen ser números pequeños (ej: 3.7, 7.4).
-3. "Grasas totales" es la primera fila de grasas, diferente de "Grasas saturadas".
-4. Si hay columna "100g": léela COMPLETA fila por fila, no solo la energía.
-5. Todos los valores son números. No incluyas unidades en los números.
+PASO 2 — Tamaño de porción:
+  Buscá "Porción X g" o "Tamaño de la porción: X g" al comienzo del bloque nutricional.
+  Ese número X es el tamaño de porción. NO uses 100 si dice otro número.
+  Ejemplo: "Porción 180 g (1 vaso)" → portion_g = 180
 
-Devolvé SOLO este JSON válido, sin texto ni markdown:
+PASO 3 — Leé los nutrientes por porción:
+  Para CADA nutriente, extraé el número que aparece JUSTO DESPUÉS del nombre del nutriente.
+  - Energía/Valor energético: si dice "137 kcal = 573 kJ" → kcal = 137 (el CHICO, nunca el kJ)
+  - Carbohidratos/Hidratos de carbono: el primer número en gramos de esa fila (NO azúcares)
+  - Proteínas: número en gramos de esa fila
+  - Grasas totales/Lípidos totales: el primer número en gramos de esa fila (NO saturadas)
+
+PASO 4 — Columna /100g:
+  Solo aplica para formato TABLA. Si existe columna "100g", leerla también.
+  Para formato PÁRRAFO: has_100g_col = false, por_100g todos en -1.
+
+REGLAS:
+- Solo números sin unidades (9 no "9 g")
+- Separador decimal: punto
+- Si no se puede leer un valor: -1
+
+Devolvé SOLO este JSON, sin texto ni markdown:
 {
   "name": "nombre del producto o desconocido",
-  "portion_g": 50,
-  "has_100g_col": true,
+  "portion_g": 180,
+  "has_100g_col": false,
   "por_porcion": {
-    "kcal": 171,
-    "carbs": 39,
-    "protein": 3.7,
-    "fat": 0
+    "kcal": 137,
+    "carbs": 13,
+    "protein": 9,
+    "fat": 5.4
   },
   "por_100g": {
-    "kcal": 342,
-    "carbs": 78,
-    "protein": 7.4,
-    "fat": 0
+    "kcal": -1,
+    "carbs": -1,
+    "protein": -1,
+    "fat": -1
   }
-}
-
-Si no existe columna 100g, dejá por_100g con todos en -1.
-Si un valor no se puede leer, poné -1 en ese campo específico."""
+}"""
                 }
             ]}]
         )
