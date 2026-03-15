@@ -242,12 +242,13 @@ async def estimate_macros_with_claude(food_name: str) -> dict | None:
     """Estima macros por 100g usando el conocimiento nutricional de Claude."""
     try:
         resp = await ai.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-5-20250929",
             max_tokens=200,
             messages=[{"role": "user", "content":
-                f"""Sos un nutricionista experto. Devolvé los macros por 100g de: "{food_name}"
-Crudo ≠ cocido (pollo crudo ~20g prot, cocido ~31g). Frito tiene más grasa.
-Devolvé SOLO JSON: {{"kcal":0,"protein":0,"fat":0,"carbs":0}}"""
+                f"""Sos un nutricionista experto. Devolvé los macros PRECISOS por 100g de: "{food_name}"
+IMPORTANTE: crudo y cocido son distintos. Crudo tiene más agua → menos kcal/prot por 100g.
+Ejemplos: pechuga cruda=120kcal/22g prot/2.6g fat | pechuga cocida=165kcal/31g prot/3.6g fat
+Devolvé SOLO JSON sin texto extra: {{"kcal":0,"protein":0,"fat":0,"carbs":0}}"""
             }]
         )
         raw = resp.content[0].text.strip()
