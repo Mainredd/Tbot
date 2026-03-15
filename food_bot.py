@@ -322,9 +322,15 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
         tr_data = json.loads(raw)
         english_name = tr_data.get("query", food_name_es)
         keywords = [k.lower() for k in tr_data.get("keywords", [])]
-    except Exception:
+    except Exception as e:
+        logging.error(f"[USDA] translation error: {e}")
         english_name = food_name_es
         keywords = []
+
+    logging.info(f"[USDA] '{food_name_es}' → query='{english_name}' keywords={keywords}")
+
+    api_key = os.environ.get("USDA_API_KEY", "DEMO_KEY")
+    logging.info(f"[USDA] usando key={'CUSTOM' if api_key != 'DEMO_KEY' else 'DEMO_KEY'}")
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -332,14 +338,15 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
                 "https://api.nal.usda.gov/fdc/v1/foods/search",
                 params={
                     "query": english_name,
-                    "api_key": os.environ.get("USDA_API_KEY", "DEMO_KEY"),
+                    "api_key": api_key,
                     "dataType": "Foundation,SR Legacy",
                     "pageSize": 20,
                 }
             )
-            foods = resp.json().get("foods", [])
+        logging.info(f"[USDA] status={resp.status_code} body={resp.text[:200]}")
+        foods = resp.json().get("foods", [])
     except Exception as e:
-        logging.error(f"USDA search error: {e}")
+        logging.error(f"[USDA] request error: {e}")
         return []
 
     # Palabras genéricas de preparación — no sirven para identificar el alimento
