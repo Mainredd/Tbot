@@ -74,67 +74,102 @@ Respuesta JSON exacta:
 # ── Claude: leer etiqueta nutricional ────────────────────────────────────────
 
 async def read_label_with_claude(image_bytes: bytes) -> dict | None:
+    """
+    Lectura en 2 pasos:
+    1. Sonnet extrae valores crudos en formato clave=valor (más confiable que JSON directo)
+    2. Python normaliza todo a /100g con aritmética explícita
+    """
+    img_b64  = base64.standard_b64encode(image_bytes).decode("utf-8")
+    img_block = {"type": "image", "source": {
+        "type": "base64", "media_type": "image/jpeg", "data": img_b64
+    }}
+
+    # ── PASO 1: extracción cruda ──────────────────────────────────────────────
     try:
-        img_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-        resp = await ai.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=600,
+        r1 = await ai.messages.create(
+            model="claude-sonnet-4-5-20251001",
+            max_tokens=500,
             messages=[{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64}},
+                img_block,
                 {"type": "text", "text":
-                    """Sos un experto en leer etiquetas nutricionales de Argentina/Latinoamérica.
+                    """Leé esta etiqueta nutricional con máxima precisión. Necesito:
 
-PASO 1 — Tamaño de porción:
-- Buscá "Tamaño de la porción" o "Porción" en gramos. Ejemplo: "60g", "30 g", "25g".
-- Leé el número con cuidado (60 ≠ 6, 30 ≠ 3).
+A) Nombre del producto (si no se ve, "desconocido")
+B) Tamaño de porción en gramos (buscá "Porción:" o "Tamaño de la porción:")
+C) Si existe columna "100g" o "cada 100g" separada → has_100g=si, sino has_100g=no
+D) Valores numéricos de: energía en KCAL, carbohidratos, proteínas, grasas TOTALES
+   - Energía: si dice "171 kcal=715 kJ" → el kcal es 171 (el número CHICO, NO el kJ)
+   - Grasas totales: NO confundir con grasas saturadas
+   - Si hay columna 100g: leé los valores de ESA columna también
 
-PASO 2 — Columna a usar:
-- Si hay columna "por 100g" o "cada 100g": usá ESE valor directamente.
-- Si solo hay "por porción": convertí con: valor_100g = valor_porción × 100 ÷ tamaño_porción_g
-
-PASO 3 — Energía (MUY IMPORTANTE):
-- Las etiquetas argentinas muestran AMBOS: "86 kcal = 361 kJ" o similar.
-- kJ (kilojoules) ≠ kcal (kilocalorías). 1 kcal ≈ 4.18 kJ.
-- SIEMPRE usá el valor en KCAL (el número más chico). NUNCA uses el kJ como kcal.
-- Ejemplo correcto: "86 kcal = 361 kJ" → kcal = 86 (NO 361)
-
-PASO 4 — Nutrientes:
-- Proteínas (o "Proteína"): g
-- Grasas totales (o "Lípidos totales"): g — NO confundas con grasas saturadas
-- Hidratos de carbono totales (o "Carbohidratos"): g
-- Ignorá: azúcares, fibra, sodio, colesterol, grasas saturadas/trans para el JSON
-
-PASO 5 — Layout de 2 columnas:
-- Muchas etiquetas argentinas dividen los nutrientes en 2 bloques lado a lado.
-- Bloque izquierdo: energía + carbohidratos + proteínas
-- Bloque derecho: grasas + fibra + sodio
-- Leé los dos bloques para obtener todos los valores.
-
-Devolvé SOLO este JSON (sin markdown, sin texto extra, sin explicación):
-{"food_name":"nombre del producto","portion_g":0,"kcal_per_portion":0,"kcal":0,"protein":0,"fat":0,"carbs":0}
-
-Donde:
-- portion_g: tamaño de porción en gramos (0 si hay columna 100g directa)
-- kcal_per_portion: kcal por porción antes de convertir (0 si hay columna 100g)
-- kcal, protein, fat, carbs: todos POR 100g"""
+Respondé ÚNICAMENTE en este formato (una clave por línea, sin texto extra):
+name=<nombre>
+portion_g=<número>
+has_100g=<si o no>
+kcal_porcion=<número o -1 si no se ve>
+carbs_porcion=<número o -1>
+protein_porcion=<número o -1>
+fat_porcion=<número o -1>
+kcal_100g=<número o -1 si no hay columna 100g>
+carbs_100g=<número o -1>
+protein_100g=<número o -1>
+fat_100g=<número o -1>"""
                 }
             ]}]
         )
-        raw = resp.content[0].text.strip()
-        raw = re.sub(r'```json?\n?', '', raw).strip('`').strip()
-        data = json.loads(raw)
-        # Validación: si portion_g > 0, verificar que la conversión sea coherente
-        portion_g = float(data.get('portion_g', 0))
-        kcal_per_portion = float(data.get('kcal_per_portion', 0))
-        kcal_100g = float(data.get('kcal', 0))
-        if portion_g > 0 and kcal_per_portion > 0:
-            expected_100g = kcal_per_portion * 100 / portion_g
-            # Si el valor devuelto difiere >20% del esperado, recalcular
-            if kcal_100g <= 0 or abs(kcal_100g - expected_100g) / expected_100g > 0.20:
-                data['kcal'] = round(expected_100g, 1)
-        return data
+        raw1 = r1.content[0].text.strip()
+        logging.info(f"[Label step1]\n{raw1}")
     except Exception as e:
-        logging.error(f"Label read error: {e}")
+        logging.error(f"Label step1 error: {e}")
+        return None
+
+    # ── PASO 2: parseo y normalización a /100g ────────────────────────────────
+    try:
+        kv: dict[str, str] = {}
+        for line in raw1.splitlines():
+            line = line.strip()
+            if '=' in line:
+                k, _, v = line.partition('=')
+                kv[k.strip().lower()] = v.strip()
+
+        def fv(key: str, default: float = -1.0) -> float:
+            try:
+                return float(kv.get(key, str(default)).replace(',', '.'))
+            except ValueError:
+                return default
+
+        name      = kv.get('name', 'desconocido')
+        portion_g = fv('portion_g', 0.0)
+        has_100g  = kv.get('has_100g', 'no').lower() in ('si', 'sí', 'yes', '1', 'true')
+
+        def best(k100: str, kp: str) -> float:
+            """Usa columna /100g si existe y es válida; sino convierte desde porción."""
+            v100 = fv(k100)
+            vp   = fv(kp)
+            if has_100g and v100 >= 0:
+                return round(v100, 1)
+            if vp >= 0 and portion_g > 0:
+                return round(vp * 100.0 / portion_g, 1)
+            if v100 >= 0:
+                return round(v100, 1)
+            return 0.0
+
+        kcal    = best('kcal_100g',    'kcal_porcion')
+        carbs   = best('carbs_100g',   'carbs_porcion')
+        protein = best('protein_100g', 'protein_porcion')
+        fat     = best('fat_100g',     'fat_porcion')
+
+        return {
+            "food_name":        name,
+            "kcal":             max(kcal,    0.0),
+            "protein":          max(protein, 0.0),
+            "fat":              max(fat,     0.0),
+            "carbs":            max(carbs,   0.0),
+            "portion_g":        portion_g,
+            "kcal_per_portion": max(fv('kcal_porcion', 0.0), 0.0),
+        }
+    except Exception as e:
+        logging.error(f"Label step2 error: {e}")
         return None
 
 
