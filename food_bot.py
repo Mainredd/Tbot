@@ -29,34 +29,43 @@ MEAL_EMOJIS = {
 }
 
 
-# ── Claude: parsear mensaje de texto ─────────────────────────────────────────
+# ── Claude: entender intent del mensaje ──────────────────────────────────────
 
-async def parse_with_claude(text: str) -> dict | None:
+async def understand_intent(text: str) -> dict | None:
     try:
         resp = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=120,
+            max_tokens=200,
             messages=[{"role": "user", "content":
-                f"""Parseá esta entrada de comida. Devolvé SOLO JSON sin markdown ni explicaciones:
+                f"""Sos un asistente de nutrición. Analizá este mensaje y devolvé SOLO JSON sin markdown:
 "{text}"
 
-Formato exacto: {{"food_name":"nombre en español","quantity_g":número,"meal_type":"desayuno|almuerzo|merienda|cena|general"}}
+Detectá el intent:
+- "log_food": el usuario quiere registrar que comió algo. Extraé food_name, quantity_g, meal_type.
+- "add_to_library": el usuario quiere agregar/guardar/crear un alimento en la biblioteca. Usá tu conocimiento para estimar macros por 100g.
+- "unknown": no es sobre comida o no se entiende.
 
-Conversiones:
-- 1 huevo/egg = 55g | 1 clara = 33g | 1 yema = 18g
-- 1 taza cereal/arroz/avena = 80g | 1 taza líquido = 240g
-- 1 cucharada = 15g | 1 cucharadita = 5g | 1 vaso = 250g
+Palabras clave para add_to_library: "agrega", "agregá", "añadí", "guardá", "guarda", "crea", "nuevo alimento", "a la biblioteca", "en la biblioteca", "registrá el alimento", "agregar".
+
+Conversiones para log_food:
+- 1 huevo = 55g | 1 clara = 33g | 1 yema = 18g | 1 cucharada = 15g | 1 cucharadita = 5g
+- 1 taza cereal/arroz/avena = 80g | 1 taza líquido = 240g | 1 vaso = 250g
 - 1 rebanada pan = 30g | 1 banana = 120g | 1 manzana = 150g
-- Si dice "N unidades", multiplicá por el peso unitario típico
+
+Respuesta JSON exacta (todos los campos siempre presentes):
+{{"intent":"log_food|add_to_library|unknown","food_name":"nombre en español","quantity_g":0,"meal_type":"general","kcal":0,"protein":0,"fat":0,"carbs":0}}
+
+- Para log_food: completá food_name, quantity_g, meal_type. kcal/protein/fat/carbs = 0.
+- Para add_to_library: completá food_name y estimá kcal/protein/fat/carbs por 100g con tu conocimiento. quantity_g = 0.
 - meal_type: detectá de palabras clave (desayuno, almuerzo, cena, merienda), si no → "general"
-- Solo JSON válido, sin texto extra"""
+- Solo JSON válido, sin texto extra."""
             }]
         )
         raw = resp.content[0].text.strip()
         raw = re.sub(r'```json?\n?', '', raw).strip('`').strip()
         return json.loads(raw)
     except Exception as e:
-        logging.error(f"Claude parse error: {e}")
+        logging.error(f"Claude intent error: {e}")
         return None
 
 
@@ -210,19 +219,67 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     thinking = await update.message.reply_text("⏳ Procesando...")
 
-    # 1. Claude parsea el texto
-    parsed = await parse_with_claude(text)
-    if not parsed or not parsed.get('food_name') or not parsed.get('quantity_g'):
+    # 1. Claude entiende el intent
+    parsed = await understand_intent(text)
+    if not parsed or parsed.get('intent') == 'unknown' or not parsed.get('food_name'):
         await thinking.edit_text(
-            "No entendí. Probá:\n`5 huevos` o `almuerzo: 1 taza de arroz`",
+            "No entendí 🤔\n\n"
+            "Podés decirme:\n"
+            "• Qué comiste: `5 huevos` o `almuerzo: 1 taza de arroz`\n"
+            "• Agregar a biblioteca: `agrega dulce de leche`",
             parse_mode='Markdown'
         )
         return
 
+    intent    = parsed.get('intent', 'log_food')
     food_name = parsed['food_name'].strip()
-    qty       = float(parsed['quantity_g'])
+
+    # ── Intent: agregar a biblioteca ─────────────────────────────────────────
+    if intent == 'add_to_library':
+        kcal    = round(float(parsed.get('kcal',    0)), 1)
+        protein = round(float(parsed.get('protein', 0)), 1)
+        fat     = round(float(parsed.get('fat',     0)), 1)
+        carbs   = round(float(parsed.get('carbs',   0)), 1)
+
+        # ¿Ya existe en la biblioteca?
+        existing = db.get_food_by_name(food_name)
+        if existing:
+            await thinking.edit_text(
+                f"📚 *{existing['name']}* ya está en tu biblioteca.\n"
+                f"{macros_line(existing['kcal'], existing['protein'], existing['fat'], existing['carbs'])}",
+                parse_mode='Markdown'
+            )
+            return
+
+        context.user_data['pending_library_add'] = {
+            'name': food_name, 'kcal': kcal, 'protein': protein,
+            'fat': fat, 'carbs': carbs,
+        }
+        keyboard = [[
+            InlineKeyboardButton("✅ Guardar en biblioteca", callback_data="library_add_confirm"),
+            InlineKeyboardButton("❌ Cancelar",               callback_data="library_add_cancel"),
+        ]]
+        await thinking.edit_text(
+            f"📚 ¿Guardar en biblioteca?\n\n"
+            f"*{food_name}* (por 100g)\n"
+            f"{macros_line(kcal, protein, fat, carbs)}\n\n"
+            "_Valores estimados por Claude. Podés editarlos después desde la web._",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    # ── Intent: registrar comida ──────────────────────────────────────────────
+    qty       = float(parsed.get('quantity_g', 0))
     meal_type = parsed.get('meal_type', 'general')
     emoji     = MEAL_EMOJIS.get(meal_type, '🍽')
+
+    if not qty:
+        await thinking.edit_text(
+            f"No entendí la cantidad de *{food_name}*.\nProbá: `200g de {food_name}`",
+            parse_mode='Markdown'
+        )
+        return
 
     # 2. Buscar en biblioteca local
     food = db.get_food_by_name(food_name)
@@ -265,8 +322,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await thinking.edit_text(
             f"❓ *{food_name}* no está en ninguna base de datos.\n\n"
-            "Agregalo desde la web (📚 Biblioteca) o mandá los macros así:\n"
-            f"`{food_name} {qty:.0f}g 200kcal 20p 8g 15c`",
+            "Podés:\n"
+            f"• Pedirme que lo agregue: `agrega {food_name}`\n"
+            f"• O mandá los macros: `{food_name} {qty:.0f}g 200kcal 20p 8g 15c`",
             parse_mode='Markdown'
         )
 
@@ -405,6 +463,23 @@ async def food_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('awaiting_label_rename', None)
         await query.edit_message_text("❌ Cancelado.")
 
+    elif data == 'library_add_confirm':
+        pending = context.user_data.pop('pending_library_add', None)
+        if not pending:
+            await query.edit_message_text("Expiró. Volvé a intentarlo.")
+            return
+        db.add_food(pending['name'], pending['kcal'], pending['protein'],
+                    pending['fat'], pending['carbs'])
+        await query.edit_message_text(
+            f"✅ *{pending['name']}* guardado en la biblioteca 📚\n"
+            f"{macros_line(pending['kcal'], pending['protein'], pending['fat'], pending['carbs'])}",
+            parse_mode='Markdown'
+        )
+
+    elif data == 'library_add_cancel':
+        context.user_data.pop('pending_library_add', None)
+        await query.edit_message_text("❌ Cancelado.")
+
 
 # ── /dia, /ayer, /semana ──────────────────────────────────────────────────────
 
@@ -489,7 +564,7 @@ def main():
     app.add_handler(CommandHandler('semana', semana))
 
     app.add_handler(CallbackQueryHandler(set_name_callback, pattern='^fname_'))
-    app.add_handler(CallbackQueryHandler(food_callback,     pattern='^(food_|label_)'))
+    app.add_handler(CallbackQueryHandler(food_callback,     pattern='^(food_|label_|library_)'))
 
     # Fotos → leer etiqueta
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
