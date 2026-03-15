@@ -667,20 +667,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        await thinking.edit_text("🔍 Buscando en USDA y fuentes nutricionales...")
+        await thinking.edit_text("🔍 Buscando en USDA, Open Food Facts y fuentes online...")
 
-        # 1. USDA FoodData Central (más preciso, diferencia crudo/cocido)
-        usda = await search_usda(food_name)
-        if usda:
-            kcal, protein, fat, carbs = usda['kcal'], usda['protein'], usda['fat'], usda['carbs']
-            source_note = f"_Fuente: USDA — {usda['source'][:55]}_"
+        # Buscar en todas las fuentes (USDA + OFF en paralelo) y promediar
+        data = await estimate_macros_with_claude(food_name)
+        if data and not data.get('estimated'):
+            kcal, protein, fat, carbs = data['kcal'], data['protein'], data['fat'], data['carbs']
+            src = data.get('source', '')
+            source_note = f"_Fuente: {src}_" if src else "_Fuente: USDA / Open Food Facts_"
         else:
-            # 2. Fallback: estimación Claude (ya calculada en understand_intent)
-            kcal    = round(float(parsed.get('kcal',    0)), 1)
-            protein = round(float(parsed.get('protein', 0)), 1)
-            fat     = round(float(parsed.get('fat',     0)), 1)
-            carbs   = round(float(parsed.get('carbs',   0)), 1)
-            source_note = "_Valores estimados por Claude. Podés editarlos después desde la web._"
+            # Último recurso: estimación de Claude
+            kcal    = round(float(data['kcal']    if data else parsed.get('kcal',    0)), 1)
+            protein = round(float(data['protein'] if data else parsed.get('protein', 0)), 1)
+            fat     = round(float(data['fat']     if data else parsed.get('fat',     0)), 1)
+            carbs   = round(float(data['carbs']   if data else parsed.get('carbs',   0)), 1)
+            source_note = "_Valores estimados por IA. Podés editarlos después desde la web._"
 
         context.user_data['pending_library_add'] = {
             'name': food_name, 'kcal': kcal, 'protein': protein,
