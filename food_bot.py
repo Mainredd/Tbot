@@ -109,9 +109,11 @@ PASO 3 — Leé los nutrientes por porción:
   - Energía/Valor energético: si dice "137 kcal = 573 kJ" → kcal = 137 (el CHICO, nunca el kJ)
   - Carbohidratos/Hidratos de carbono: el primer número en gramos de esa fila (NO azúcares)
   - Proteínas: número en gramos de esa fila
-  - Grasas totales/Lípidos totales: el número que aparece DESPUÉS de "Grasas totales" o "Lípidos totales".
-    IMPORTANTE: ignorá completamente "Grasas saturadas", "Grasas trans", "Grasas monoinsaturadas", "Grasas poliinsaturadas".
-    Solo el valor de GRASAS TOTALES. Ejemplo: "Grasas totales 5.4 g; Grasas saturadas 3.3 g" → fat = 5.4
+  - Grasas totales/Lípidos totales: buscá EXACTAMENTE el texto "Grasas totales" o "Lípidos totales".
+    El valor fat es el primer número después de esas palabras EXACTAS.
+    ⚠️ NUNCA uses el número de "Grasas saturadas", "Grasas trans", "Grasas mono" o "Grasas poli".
+    Ejemplo CORRECTO: "Grasas totales 5.4 g (10% VD); Grasas saturadas 3.3 g" → fat = 5.4
+    Ejemplo INCORRECTO: tomar 3.3 porque es el número más visible → fat = 3.3 ← ESTO ESTÁ MAL
 
 PASO 4 — Columna /100g:
   Solo aplica para formato TABLA. Si existe columna "100g", leerla también.
@@ -185,14 +187,24 @@ Devolvé SOLO este JSON, sin texto ni markdown:
         protein = best('protein')
         fat     = best('fat')
 
-        # Sanity check: kcal ≥ 4*protein + 4*carbs + 9*fat (aprox).
-        # Si kcal es menor que los carbos solos, Claude confundió filas → usar conversión desde porción
+        # ── Sanity 1: si kcal < carbs → Claude confundió filas completas ──────
         if kcal > 0 and carbs > 0 and kcal < carbs and portion > 0:
-            logging.warning(f"[Label sanity] kcal({kcal}) < carbs({carbs}), recalculando desde porción")
+            logging.warning(f"[Label sanity1] kcal({kcal}) < carbs({carbs}), recalculando desde porción")
             kcal    = round(safe(pp, 'kcal')    * 100.0 / portion, 1) if safe(pp, 'kcal') >= 0 else kcal
             carbs   = round(safe(pp, 'carbs')   * 100.0 / portion, 1) if safe(pp, 'carbs') >= 0 else carbs
             protein = round(safe(pp, 'protein') * 100.0 / portion, 1) if safe(pp, 'protein') >= 0 else protein
             fat     = round(safe(pp, 'fat')     * 100.0 / portion, 1) if safe(pp, 'fat') >= 0 else fat
+
+        # ── Sanity 2: fórmula calórica 4P + 4C + 9F ≈ kcal ─────────────────
+        # Si las grasas reportadas son muy bajas, Claude leyó saturadas en vez de totales.
+        # Recalculo fat = (kcal - 4*protein - 4*carbs) / 9
+        if kcal > 0 and protein >= 0 and carbs >= 0:
+            calc_kcal = 4.0 * protein + 4.0 * carbs + 9.0 * fat
+            if calc_kcal > 0 and (kcal / calc_kcal) > 1.20:
+                fat_corr = round((kcal - 4.0 * protein - 4.0 * carbs) / 9.0, 1)
+                if fat_corr > fat:
+                    logging.warning(f"[Label sanity2] calc_kcal={calc_kcal:.1f} vs kcal={kcal:.1f} → fat {fat}→{fat_corr}")
+                    fat = max(fat_corr, 0.0)
 
         return {
             "food_name":        name,
