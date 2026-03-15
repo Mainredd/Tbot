@@ -352,10 +352,16 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
 
     # Palabras que indican productos procesados/mixtos — no sirven para ingredientes crudos
     USDA_PROCESSED = {
+        # Embutidos / procesados
         "spread","frankfurter","bologna","bratwurst","sausage","salami","pepperoni",
         "patty","nugget","tender","meatless","imitation","substitute","analog",
         "fast food","fast foods","canned","smoked","jerky","pate","loaf",
         "corned","deli","luncheon","hot dog","wiener","chorizo",
+        # Platos preparados / mezclas
+        "soup","stew","pie","casserole","gravy","curry","sauce","stuffed",
+        "noodle","pasta","rice","sandwich","salad","taco","burrito","wrap",
+        "mixed","dish","dinner","meal","entree","frozen entree","baby food",
+        "with ","infant","formula","fat,",
     }
 
     def _parse_foods(foods_list):
