@@ -6,6 +6,7 @@ import base64
 import httpx
 import anthropic
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -20,6 +21,7 @@ FOOD_TOKEN        = os.getenv('FOOD_BOT_TOKEN')
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 
 ai = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+AR = ZoneInfo("America/Argentina/Buenos_Aires")
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -285,7 +287,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     food = db.get_food_by_name(food_name)
     if food:
         kcal, protein, fat, carbs = calc_macros(food, qty)
-        db.log_food(user_id, food['name'], qty, kcal, protein, fat, carbs, meal_type)
+        today_ar = datetime.now(AR).strftime('%Y-%m-%d')
+        db.log_food_with_date(user_id, food['name'], qty, kcal, protein, fat, carbs, meal_type, today_ar)
         await thinking.edit_text(
             f"{emoji} *{food['name']}* — {qty:.0f}g\n{macros_line(kcal, protein, fat, carbs)}",
             parse_mode='Markdown'
@@ -480,14 +483,26 @@ async def food_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('pending_library_add', None)
         await query.edit_message_text("❌ Cancelado.")
 
+    elif data == 'delete_log_confirm':
+        log_id = context.user_data.pop('pending_delete_log', None)
+        if not log_id:
+            await query.edit_message_text("Expiró.")
+            return
+        db.delete_food_log(log_id)
+        await query.edit_message_text("✅ Registro eliminado.")
+
+    elif data == 'delete_log_cancel':
+        context.user_data.pop('pending_delete_log', None)
+        await query.edit_message_text("❌ Cancelado.")
+
 
 # ── /dia, /ayer, /semana ──────────────────────────────────────────────────────
 
 async def dia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _daily_summary(update, datetime.now().strftime('%Y-%m-%d'), 'hoy')
+    await _daily_summary(update, datetime.now(AR).strftime('%Y-%m-%d'), 'hoy')
 
 async def ayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _daily_summary(update, (datetime.now()-timedelta(days=1)).strftime('%Y-%m-%d'), 'ayer')
+    await _daily_summary(update, (datetime.now(AR)-timedelta(days=1)).strftime('%Y-%m-%d'), 'ayer')
 
 async def _daily_summary(update: Update, date: str, label: str):
     user_id = update.effective_user.id
@@ -525,13 +540,36 @@ async def _daily_summary(update: Update, date: str, label: str):
     await update.message.reply_text('\n'.join(lines), parse_mode='Markdown')
 
 
+async def borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user = db.get_user(user_id)
+    if not user:
+        await update.message.reply_text("Primero hacé /start.")
+        return
+    last = db.get_last_food_log(user_id)
+    if not last:
+        await update.message.reply_text("No tenés registros para borrar.")
+        return
+    context.user_data['pending_delete_log'] = last['id']
+    keyboard = [[
+        InlineKeyboardButton("✅ Sí, borrar", callback_data="delete_log_confirm"),
+        InlineKeyboardButton("❌ No",          callback_data="delete_log_cancel"),
+    ]]
+    await update.message.reply_text(
+        f"¿Borrar el último registro?\n\n"
+        f"*{last['food_name']}* — {float(last['quantity_g']):.0f}g ({float(last['kcal']):.0f} kcal)",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
 async def semana(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = db.get_user(user_id)
     if not user:
         await update.message.reply_text("Primero hacé /start.")
         return
-    today = datetime.now().date()
+    today = datetime.now(AR).date()
     lines = [f"📅 *Semana — {user['name']}*\n"]
     total = 0
     dias = 0
@@ -558,13 +596,14 @@ def main():
     db.init_db()
     app = Application.builder().token(FOOD_TOKEN).build()
 
-    app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('dia',   dia))
-    app.add_handler(CommandHandler('ayer',  ayer))
+    app.add_handler(CommandHandler('start',  start))
+    app.add_handler(CommandHandler('dia',    dia))
+    app.add_handler(CommandHandler('ayer',   ayer))
     app.add_handler(CommandHandler('semana', semana))
+    app.add_handler(CommandHandler('borrar', borrar))
 
     app.add_handler(CallbackQueryHandler(set_name_callback, pattern='^fname_'))
-    app.add_handler(CallbackQueryHandler(food_callback,     pattern='^(food_|label_|library_)'))
+    app.add_handler(CallbackQueryHandler(food_callback,     pattern='^(food_|label_|library_|delete_log_)'))
 
     # Fotos → leer etiqueta
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))

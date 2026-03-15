@@ -1,12 +1,14 @@
 import json
 import os
+from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify
 from database import (
     get_conn, init_db,
     create_session_with_date, log_exercise, update_exercise,
     delete_session, delete_exercise,
     get_all_foods, add_food, update_food, delete_food,
-    log_food_with_date, get_food_logs_by_date, update_food_log, delete_food_log
+    log_food_with_date, get_food_logs_by_date, update_food_log, delete_food_log,
+    get_food_week_summary,
 )
 from exercises import WORKOUTS
 
@@ -205,6 +207,23 @@ def api_update_food(food_id):
 def api_delete_food_item(food_id):
     delete_food(food_id)
     return jsonify({'ok': True})
+
+
+@app.route('/api/food-week')
+def api_food_week():
+    user_id = request.args.get('user_id', type=int)
+    if not user_id:
+        return jsonify({'error': 'user_id requerido'}), 400
+    today = datetime.now().date()
+    start = today - timedelta(days=6)
+    data = get_food_week_summary(user_id, start.strftime('%Y-%m-%d'))
+    # Rellenar días sin datos con 0
+    day_map = {d['date']: d for d in data}
+    result = []
+    for i in range(6, -1, -1):
+        day = (today - timedelta(days=i)).strftime('%Y-%m-%d')
+        result.append(day_map.get(day, {'date': day, 'kcal': 0, 'protein': 0}))
+    return jsonify({'data': result, 'today': today.strftime('%Y-%m-%d')})
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

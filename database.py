@@ -428,3 +428,28 @@ def update_food_log(log_id, quantity_g, kcal, protein, fat, carbs, meal_type):
 def delete_food_log(log_id):
     with get_conn() as conn:
         conn.execute('DELETE FROM food_logs WHERE id = ?', (log_id,))
+
+
+def get_last_food_log(user_id: int):
+    with get_conn() as conn:
+        row = conn.execute(
+            '''SELECT id, food_name, quantity_g, kcal, meal_type FROM food_logs
+               WHERE user_id = ? ORDER BY id DESC LIMIT 1''',
+            (user_id,)
+        ).fetchone()
+        if row:
+            return {'id': row[0], 'food_name': row[1], 'quantity_g': row[2],
+                    'kcal': row[3], 'meal_type': row[4]}
+    return None
+
+
+def get_food_week_summary(user_id: int, start_date: str):
+    """Retorna totales de kcal y proteínas agrupados por día, desde start_date."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            '''SELECT date, SUM(kcal), SUM(protein) FROM food_logs
+               WHERE user_id = ? AND date >= ? GROUP BY date ORDER BY date''',
+            (user_id, start_date)
+        ).fetchall()
+        return [{'date': r[0], 'kcal': round(r[1], 1), 'protein': round(r[2], 1)}
+                for r in rows]

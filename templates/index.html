@@ -252,6 +252,33 @@
 
     .empty-state { padding: 36px 20px; text-align: center; color: var(--muted); font-size: 0.88rem; }
 
+    /* ── Progress bars ── */
+    .macro-goals {
+      padding: 10px 18px 14px; border-bottom: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 7px;
+    }
+    .goal-row { display: flex; align-items: center; gap: 10px; font-size: 0.74rem; }
+    .goal-label { width: 68px; color: var(--muted); white-space: nowrap; }
+    .goal-bar-wrap {
+      flex: 1; height: 7px; background: rgba(255,255,255,0.08);
+      border-radius: 4px; overflow: hidden;
+    }
+    .goal-bar { height: 100%; border-radius: 4px; transition: width 0.5s ease; max-width: 100%; }
+    .goal-bar.kcal { background: var(--orange); }
+    .goal-bar.prot { background: #e57373; }
+    .goal-bar.over { background: var(--accent); }
+    .goal-pct { width: 40px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    /* ── Week chart ── */
+    .week-chart-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 20px; margin-top: 20px;
+    }
+    .week-chart-title {
+      font-size: 0.88rem; font-weight: 600; margin-bottom: 16px;
+      display: flex; align-items: center; gap: 8px; color: var(--text);
+    }
+
     @media (max-width: 600px) {
       main { padding: 16px; }
       header { padding: 14px 16px; }
@@ -260,6 +287,7 @@
       .fields-4 { grid-template-columns: repeat(2, 1fr); }
     }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -424,12 +452,33 @@
           <div class="macro-item"><div class="macro-value macro-fat"  id="m-fat-{{ user.id }}">0g</div><div class="macro-label">grasas</div></div>
           <div class="macro-item"><div class="macro-value macro-carbs" id="m-carbs-{{ user.id }}">0g</div><div class="macro-label">carbos</div></div>
         </div>
+        <!-- Goal progress bars -->
+        <div class="macro-goals">
+          <div class="goal-row">
+            <span class="goal-label">🔥 Kcal</span>
+            <div class="goal-bar-wrap"><div class="goal-bar kcal" id="gb-kcal-{{ user.id }}" style="width:0%"></div></div>
+            <span class="goal-pct" id="gp-kcal-{{ user.id }}">0%</span>
+          </div>
+          <div class="goal-row">
+            <span class="goal-label">🥩 Proteínas</span>
+            <div class="goal-bar-wrap"><div class="goal-bar prot" id="gb-prot-{{ user.id }}" style="width:0%"></div></div>
+            <span class="goal-pct" id="gp-prot-{{ user.id }}">0%</span>
+          </div>
+        </div>
         <!-- Meals -->
         <div id="meals-{{ user.id }}">
           <div class="empty-state">Cargando...</div>
         </div>
       </div>
       {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Gráfico semanal -->
+    {% if users %}
+    <div class="week-chart-card">
+      <div class="week-chart-title">📊 Calorías — últimos 7 días</div>
+      <canvas id="weekChart" height="90"></canvas>
     </div>
     {% endif %}
   </div>
@@ -645,8 +694,11 @@
   const EXERCISES_BY_DAY = {{ exercises_by_day | tojson }};
   const USERS = {{ users | tojson }};
   const MEAL_EMOJIS = { desayuno:'🌅', almuerzo:'☀️', merienda:'🍎', cena:'🌙', general:'🍽' };
+  const KCAL_GOAL = 2000;
+  const PROT_GOAL = 150;
 
   let currentPanel = 'sesiones';
+  let weekChartInstance = null;
   let currentDate = new Date();
   let currentSessionId = null;
   let currentLogId = null;
@@ -664,7 +716,7 @@
     const btn = document.getElementById('btn-new-action');
     btn.textContent = btnLabel[name] || '+ Nuevo';
     btn.style.display = btnLabel[name] ? '' : 'none';
-    if (name === 'comidas') loadFoodDay();
+    if (name === 'comidas') { loadFoodDay(); loadWeekChart(); }
   }
 
   function handleNewAction() {
@@ -809,6 +861,20 @@
     document.getElementById(`m-carbs-${userId}`).textContent = fmt(totCarbs)+'g';
     document.getElementById(`food-stats-${userId}`).innerHTML =
       `<span class="stat-badge">${logs.length} registros</span>`;
+
+    // Progress bars
+    const kPct = Math.min(Math.round(totKcal / KCAL_GOAL * 100), 100);
+    const pPct = Math.min(Math.round(totProt / PROT_GOAL * 100), 100);
+    const kOver = totKcal > KCAL_GOAL;
+    const pOver = totProt > PROT_GOAL;
+    const kBar = document.getElementById(`gb-kcal-${userId}`);
+    const pBar = document.getElementById(`gb-prot-${userId}`);
+    kBar.style.width = kPct + '%';
+    kBar.className = 'goal-bar kcal' + (kOver ? ' over' : '');
+    pBar.style.width = pPct + '%';
+    pBar.className = 'goal-bar prot' + (pOver ? ' over' : '');
+    document.getElementById(`gp-kcal-${userId}`).textContent = kPct + '%';
+    document.getElementById(`gp-prot-${userId}`).textContent = pPct + '%';
 
     const container = document.getElementById(`meals-${userId}`);
     if (!logs.length) { container.innerHTML = '<div class="empty-state">Sin registros este día.</div>'; return; }
@@ -1023,6 +1089,69 @@
     const res = await fetch(`/api/food/${id}`, { method:'DELETE' });
     if (res.ok) { toast('Eliminado'); document.getElementById(`food-row-${id}`)?.remove(); }
     else toast('Error', false);
+  }
+
+  // ── Semana: gráfico ───────────────────────────────────────────────────────
+  async function loadWeekChart() {
+    if (!USERS.length) return;
+    const colors = { Leo: '#4fc3f7', Caro: '#f48fb1' };
+    const defaultColors = ['#c8ff00', '#ff9800'];
+    const datasets = [];
+    let labels = [];
+
+    for (let i = 0; i < USERS.length; i++) {
+      const user = USERS[i];
+      const resp = await fetch(`/api/food-week?user_id=${user.id}`);
+      const json = await resp.json();
+      if (!labels.length) {
+        const today = new Date();
+        labels = json.data.map(d => {
+          const date = new Date(d.date + 'T00:00:00');
+          const diff = Math.round((today - date) / 86400000);
+          if (diff === 0) return 'Hoy';
+          if (diff === 1) return 'Ayer';
+          return date.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric' });
+        });
+      }
+      const color = colors[user.name] || defaultColors[i];
+      datasets.push({
+        label: user.name,
+        data: json.data.map(d => d.kcal),
+        backgroundColor: color + '99',
+        borderColor: color,
+        borderWidth: 2,
+        borderRadius: 6,
+      });
+    }
+
+    const canvas = document.getElementById('weekChart');
+    if (!canvas) return;
+    if (weekChartInstance) weekChartInstance.destroy();
+    weekChartInstance = new Chart(canvas, {
+      type: 'bar',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: '#aaa', font: { size: 12 } } },
+          tooltip: {
+            callbacks: {
+              label: ctx => ` ${ctx.dataset.label}: ${Math.round(ctx.raw)} kcal`
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#666' }, grid: { color: '#1a1a1a' } },
+          y: {
+            ticks: { color: '#666' }, grid: { color: '#1a1a1a' },
+            suggestedMax: KCAL_GOAL,
+            afterDataLimits(scale) {
+              scale.max = Math.max(scale.max, KCAL_GOAL * 1.1);
+            }
+          }
+        }
+      }
+    });
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────
