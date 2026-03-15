@@ -87,7 +87,7 @@ async def read_label_with_claude(image_bytes: bytes) -> dict | None:
     # ── PASO 1: extracción cruda ──────────────────────────────────────────────
     try:
         r1 = await ai.messages.create(
-            model="claude-sonnet-4-5-20251001",
+            model="claude-haiku-4-5-20251001",
             max_tokens=500,
             messages=[{"role": "user", "content": [
                 img_block,
@@ -682,9 +682,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = await read_label_with_claude(photo_bytes)
 
-    if not data or not data.get('food_name'):
+    if not data or not data.get('food_name') or data.get('food_name') == 'desconocido':
         await thinking.edit_text(
-            "No pude leer la etiqueta. Asegurate de que sea clara, con buena luz y sin reflejos."
+            "⚠️ No pude leer la etiqueta bien.\n\n"
+            "Podés:\n"
+            "• Intentar con mejor luz / menos ángulo\n"
+            "• Ingresar los valores manualmente con:\n"
+            "`agrega <nombre> 342kcal 7prot 0grasas 78carbos`",
+            parse_mode='Markdown'
         )
         return
 
