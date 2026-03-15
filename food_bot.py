@@ -239,33 +239,13 @@ Devolvé SOLO este JSON sin markdown:
 # ── Claude: estimar macros de un alimento desconocido ────────────────────────
 
 async def estimate_macros_with_claude(food_name: str) -> dict | None:
-    """
-    Busca en USDA para mayor precisión.
-    Solo usa estimación de Claude como último recurso.
-    """
-    # 1. Buscar en USDA
-    usda_results = await search_usda_multi(food_name)
-
-    if usda_results:
-        avg = _average_results(usda_results)
-        n_usda = len(usda_results)
-        source_tag = f"promedio {n_usda} USDA"
-        logging.info(f"[estimate] '{food_name}' → {source_tag}: {avg}")
-        return {
-            "name":      food_name,
-            "source":    source_tag,
-            "estimated": False,
-            **avg,
-        }
-
-    # 2. Fallback: Claude como último recurso
-    logging.warning(f"[estimate] Sin datos online para '{food_name}', usando Claude")
+    """Estima macros por 100g usando el conocimiento nutricional de Claude."""
     try:
         resp = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=200,
             messages=[{"role": "user", "content":
-                f"""Sos un nutricionista experto. Estimá los macros por 100g de: "{food_name}"
+                f"""Sos un nutricionista experto. Devolvé los macros por 100g de: "{food_name}"
 Crudo ≠ cocido (pollo crudo ~20g prot, cocido ~31g). Frito tiene más grasa.
 Devolvé SOLO JSON: {{"kcal":0,"protein":0,"fat":0,"carbs":0}}"""
             }]
@@ -273,8 +253,10 @@ Devolvé SOLO JSON: {{"kcal":0,"protein":0,"fat":0,"carbs":0}}"""
         raw = resp.content[0].text.strip()
         raw = re.sub(r'```json?\n?', '', raw).strip('`').strip()
         data = json.loads(raw)
+        logging.info(f"[Claude] '{food_name}' → {data}")
         return {
-            "name": food_name, "estimated": True,
+            "name":    food_name,
+            "estimated": True,
             "kcal":    round(float(data.get("kcal",    0)), 1),
             "protein": round(float(data.get("protein", 0)), 1),
             "fat":     round(float(data.get("fat",     0)), 1),
