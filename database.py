@@ -344,8 +344,8 @@ def get_food_by_name(name: str):
                 if all(any(v in fname for v in variants(w)) for w in words):
                     return _food_row(food_row)
 
-        # 6. Fallback: solo la primera palabra significativa (último recurso)
-        if words:
+        # 6. Fallback: solo para queries de UNA palabra significativa
+        if len(words) == 1:
             word = words[0]
             row = search(f'%{word}%')
             if row:
