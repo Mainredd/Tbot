@@ -342,13 +342,23 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
         logging.error(f"USDA search error: {e}")
         return []
 
-    query_words = [w for w in english_name.lower().split() if len(w) > 3]
-    results = []
+    # Palabras genéricas de preparación — no sirven para identificar el alimento
+    PREP_WORDS = {"cooked","raw","fried","boiled","grilled","baked",
+                  "roasted","steamed","dried","fresh","frozen","canned"}
 
+    # Usar keywords de Claude si están disponibles; si no, extraer el nombre del alimento
+    # excluyendo las palabras de preparación genéricas
+    if keywords:
+        filter_words = [k for k in keywords if k not in PREP_WORDS] or keywords[:1]
+    else:
+        filter_words = [w for w in english_name.lower().split()
+                        if len(w) > 3 and w not in PREP_WORDS]
+
+    results = []
     for food in foods:
         desc = food.get("description", "").lower()
-        # Al menos una keyword principal debe estar en el nombre
-        if query_words and not any(w in desc for w in query_words):
+        # Rechazar si ninguna keyword específica del alimento aparece en la descripción
+        if filter_words and not any(w in desc for w in filter_words):
             continue
         nutrients = {n["nutrientId"]: n["value"] for n in food.get("foodNutrients", [])}
         kcal = float(nutrients.get(1008, 0))
@@ -364,7 +374,7 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
         if len(results) >= 8:
             break
 
-    logging.info(f"[USDA] '{english_name}' → {len(results)} resultados relevantes: {[r['source'][:30] for r in results]}")
+    logging.info(f"[USDA] '{english_name}' filter={filter_words} → {len(results)} resultados: {[r['source'][:35] for r in results]}")
     return results
 
 
