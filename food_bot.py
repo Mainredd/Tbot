@@ -682,7 +682,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = await read_label_with_claude(photo_bytes)
 
-    if not data or not data.get('food_name') or data.get('food_name') == 'desconocido':
+    # Aplicar caption ANTES de validar: si el usuario mandó nombre, úsalo aunque Claude no leyera el producto
+    caption = (update.message.caption or '').strip()
+    if data and caption:
+        data['food_name'] = caption
+
+    # Fallar solo si no hay datos en absoluto o sin nombre Y sin caption
+    has_macros = data and data.get('kcal', 0) > 0
+    has_name   = data and data.get('food_name') and data.get('food_name') != 'desconocido'
+    if not has_macros and not (caption and data):
         await thinking.edit_text(
             "⚠️ No pude leer la etiqueta bien.\n\n"
             "Podés:\n"
@@ -692,11 +700,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-
-    # Si el usuario mandó la foto con un caption, usarlo como nombre
-    caption = (update.message.caption or '').strip()
-    if caption:
-        data['food_name'] = caption
+    if not has_name and not caption:
+        await thinking.edit_text(
+            "⚠️ Leí los macros pero no el nombre del producto.\n\n"
+            "Mandá la foto de nuevo con el nombre como texto adjunto (caption).\n"
+            "Por ejemplo: mandá la foto y escribí `Arroz integral` al mismo tiempo.",
+            parse_mode='Markdown'
+        )
+        return
 
     context.user_data['pending_label'] = data
     portion_g = data.get('portion_g', 0)
