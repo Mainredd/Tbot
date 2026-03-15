@@ -332,7 +332,7 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
                 "https://api.nal.usda.gov/fdc/v1/foods/search",
                 params={
                     "query": english_name,
-                    "api_key": "DEMO_KEY",
+                    "api_key": os.environ.get("USDA_API_KEY", "DEMO_KEY"),
                     "dataType": "Foundation,SR Legacy",
                     "pageSize": 20,
                 }
@@ -368,19 +368,18 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
     return results
 
 
-async def search_off_multi(name: str) -> list[dict]:
-    """Devuelve todos los resultados relevantes de Open Food Facts (hasta 6)."""
+async def _off_search_terms(terms: str, query_words: list[str]) -> list[dict]:
+    """Busca en OFF con ciertos términos y filtra por relevancia."""
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             resp = await client.get(
                 "https://world.openfoodfacts.org/cgi/search.pl",
                 params={
-                    "search_terms": name, "search_simple": 1,
-                    "action": "process", "json": 1, "page_size": 15,
-                    "fields": "product_name,nutriments",
+                    "search_terms": terms, "search_simple": 1,
+                    "action": "process", "json": 1, "page_size": 20,
+                    "fields": "product_name,nutriments,categories_tags",
                 }
             )
-        query_words = [w for w in name.lower().split() if len(w) > 2]
         results = []
         for product in resp.json().get("products", []):
             n = product.get("nutriments", {})
@@ -388,10 +387,20 @@ async def search_off_multi(name: str) -> list[dict]:
             if not kcal or float(kcal) <= 0:
                 continue
             pname = (product.get("product_name") or "").lower()
-            if not any(w in pname for w in query_words):
+            cats  = " ".join(product.get("categories_tags") or []).lower()
+            # El alimento debe aparecer en nombre del producto O categorías
+            if not any(w in pname or w in cats for w in query_words):
                 continue
+            # Descartar productos con carbos altos para alimentos que no deben tenerlos
+            # (ej: merluza rebozada tiene rebozado, no sirve para "merluza" genérica)
+            # Solo usamos products donde el nombre empiece con el alimento buscado
+            if not any(pname.startswith(w) or pname.startswith(terms.lower()) for w in query_words):
+                # Aceptar igual si la primera palabra coincide
+                first_word = pname.split()[0] if pname else ""
+                if first_word not in query_words and not any(w == first_word for w in query_words):
+                    continue
             results.append({
-                "source":  product.get("product_name", name),
+                "source":  product.get("product_name", terms),
                 "kcal":    float(kcal),
                 "protein": float(n.get("proteins_100g",      0)),
                 "fat":     float(n.get("fat_100g",           0)),
@@ -399,11 +408,41 @@ async def search_off_multi(name: str) -> list[dict]:
             })
             if len(results) >= 6:
                 break
-        logging.info(f"[OFF] '{name}' → {len(results)} resultados")
         return results
     except Exception as e:
-        logging.error(f"OFF multi search error: {e}")
+        logging.error(f"OFF search '{terms}' error: {e}")
         return []
+
+
+async def search_off_multi(name: str) -> list[dict]:
+    """
+    Busca en OFF en español primero, luego en inglés si no hay resultados.
+    Devuelve hasta 6 resultados relevantes para promediar.
+    """
+    query_words = [w for w in name.lower().split() if len(w) > 2]
+
+    # Búsqueda en español
+    results = await _off_search_terms(name, query_words)
+
+    # Si no hay resultados, traducir al inglés y buscar de nuevo
+    if not results:
+        try:
+            tr = await ai.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=30,
+                messages=[{"role": "user", "content":
+                    f"Translate to English (1-2 words only): '{name}'. Reply ONLY the translation."
+                }]
+            )
+            en_name = tr.content[0].text.strip().lower()
+            en_words = [w for w in en_name.split() if len(w) > 2]
+            if en_name and en_name != name.lower():
+                results = await _off_search_terms(en_name, en_words or query_words)
+                logging.info(f"[OFF] '{name}' → '{en_name}' (EN) → {len(results)} resultados")
+        except Exception:
+            pass
+
+    logging.info(f"[OFF] '{name}' total → {len(results)} resultados")
+    return results
 
 
 def _average_results(results: list[dict]) -> dict:
