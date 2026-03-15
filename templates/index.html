@@ -698,6 +698,13 @@
   <div class="panel" id="panel-biblioteca">
     <div class="library-header">
       <input class="search-box" type="text" id="food-search" placeholder="🔍 Buscar alimento..." oninput="filterFoods()" />
+      <div style="display:flex; align-items:center; gap:8px;">
+        <label style="font-size:0.82rem; color:var(--muted); white-space:nowrap;">Por:</label>
+        <input type="number" id="lib-qty" value="100" min="1" max="9999"
+          style="width:72px; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:7px 10px; border-radius:8px; font-size:0.88rem; outline:none;"
+          oninput="updateLibQty()" />
+        <span style="font-size:0.82rem; color:var(--muted);">g</span>
+      </div>
       <button class="btn btn-accent" onclick="openNewFoodModal()">+ Nuevo alimento</button>
     </div>
     <div class="table-wrap">
@@ -705,21 +712,23 @@
         <thead>
           <tr>
             <th>Alimento</th>
-            <th>Kcal / 100g</th>
-            <th>Prot / 100g</th>
-            <th>Grasas / 100g</th>
-            <th>Carbos / 100g</th>
+            <th>Kcal / <span id="lib-qty-label">100g</span></th>
+            <th>Prot / <span class="lib-qty-label-ref">100g</span></th>
+            <th>Grasas / <span class="lib-qty-label-ref">100g</span></th>
+            <th>Carbos / <span class="lib-qty-label-ref">100g</span></th>
             <th></th>
           </tr>
         </thead>
         <tbody id="food-table-body">
           {% for food in foods %}
-          <tr id="food-row-{{ food.id }}" data-name="{{ food.name | lower }}">
+          <tr id="food-row-{{ food.id }}" data-name="{{ food.name | lower }}"
+              data-kcal="{{ food.kcal }}" data-prot="{{ food.protein }}"
+              data-fat="{{ food.fat }}" data-carbs="{{ food.carbs }}">
             <td>{{ food.name }}</td>
-            <td class="num">{{ food.kcal }}</td>
-            <td class="num">{{ food.protein }}</td>
-            <td class="num">{{ food.fat }}</td>
-            <td class="num">{{ food.carbs }}</td>
+            <td class="num fv-kcal">{{ food.kcal }}</td>
+            <td class="num fv-prot">{{ food.protein }}</td>
+            <td class="num fv-fat">{{ food.fat }}</td>
+            <td class="num fv-carbs">{{ food.carbs }}</td>
             <td>
               <div class="actions">
                 <button class="btn btn-sm" onclick="openEditFoodModal({{ food.id }}, '{{ food.name }}', {{ food.kcal }}, {{ food.protein }}, {{ food.fat }}, {{ food.carbs }})">✏</button>
@@ -1433,6 +1442,23 @@
           <span style="font-size:1.4rem;">▶</span> Ver video en YouTube
         </a>
       </div>`;
+  }
+
+  // ── Biblioteca: cantidad por porción ─────────────────────────────────────
+  function updateLibQty() {
+    const qty = parseFloat(document.getElementById('lib-qty').value) || 100;
+    const factor = qty / 100;
+    const label = qty + 'g';
+    document.getElementById('lib-qty-label').textContent = label;
+    document.querySelectorAll('.lib-qty-label-ref').forEach(el => el.textContent = label);
+    document.querySelectorAll('#food-table-body tr').forEach(row => {
+      const base = { kcal: parseFloat(row.dataset.kcal)||0, prot: parseFloat(row.dataset.prot)||0,
+                     fat:  parseFloat(row.dataset.fat) ||0, carbs: parseFloat(row.dataset.carbs)||0 };
+      row.querySelector('.fv-kcal').textContent  = fmt(base.kcal  * factor);
+      row.querySelector('.fv-prot').textContent  = fmt(base.prot  * factor);
+      row.querySelector('.fv-fat').textContent   = fmt(base.fat   * factor);
+      row.querySelector('.fv-carbs').textContent = fmt(base.carbs * factor);
+    });
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────
