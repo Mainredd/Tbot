@@ -377,7 +377,7 @@ async def _off_search_terms(terms: str, query_words: list[str]) -> list[dict]:
                 params={
                     "search_terms": terms, "search_simple": 1,
                     "action": "process", "json": 1, "page_size": 20,
-                    "fields": "product_name,nutriments,categories_tags",
+                    "fields": "product_name,nutriments",
                 }
             )
         results = []
@@ -387,18 +387,9 @@ async def _off_search_terms(terms: str, query_words: list[str]) -> list[dict]:
             if not kcal or float(kcal) <= 0:
                 continue
             pname = (product.get("product_name") or "").lower()
-            cats  = " ".join(product.get("categories_tags") or []).lower()
-            # El alimento debe aparecer en nombre del producto O categorías
-            if not any(w in pname or w in cats for w in query_words):
+            # Al menos una palabra del query debe aparecer en el nombre del producto
+            if not any(w in pname for w in query_words):
                 continue
-            # Descartar productos con carbos altos para alimentos que no deben tenerlos
-            # (ej: merluza rebozada tiene rebozado, no sirve para "merluza" genérica)
-            # Solo usamos products donde el nombre empiece con el alimento buscado
-            if not any(pname.startswith(w) or pname.startswith(terms.lower()) for w in query_words):
-                # Aceptar igual si la primera palabra coincide
-                first_word = pname.split()[0] if pname else ""
-                if first_word not in query_words and not any(w == first_word for w in query_words):
-                    continue
             results.append({
                 "source":  product.get("product_name", terms),
                 "kcal":    float(kcal),
