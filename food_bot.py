@@ -87,7 +87,7 @@ async def read_label_with_claude(image_bytes: bytes) -> dict | None:
     # ── PASO 1: extracción cruda ──────────────────────────────────────────────
     try:
         r1 = await ai.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-sonnet-4-5-20250929",
             max_tokens=500,
             messages=[{"role": "user", "content": [
                 img_block,
