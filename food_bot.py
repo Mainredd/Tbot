@@ -350,11 +350,22 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
 
     filter_words = food_keywords if food_keywords else [main_keyword]
 
+    # Palabras que indican productos procesados/mixtos — no sirven para ingredientes crudos
+    USDA_PROCESSED = {
+        "spread","frankfurter","bologna","bratwurst","sausage","salami","pepperoni",
+        "patty","nugget","tender","meatless","imitation","substitute","analog",
+        "fast food","fast foods","canned","smoked","jerky","pate","loaf",
+        "corned","deli","luncheon","hot dog","wiener","chorizo",
+    }
+
     def _parse_foods(foods_list):
         results = []
         for food in foods_list:
             desc = food.get("description", "").lower()
             if not any(w in desc for w in filter_words):
+                continue
+            # Excluir productos procesados (embutidos, fast food, enlatados, etc.)
+            if any(p in desc for p in USDA_PROCESSED):
                 continue
             nutrients = {n["nutrientId"]: n["value"] for n in food.get("foodNutrients", [])}
             kcal = float(nutrients.get(1008, 0))
