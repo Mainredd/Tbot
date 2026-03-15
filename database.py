@@ -98,19 +98,30 @@ def init_db():
                 created_at TEXT DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(telegram_id)
             );
+
+            CREATE TABLE IF NOT EXISTS meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            );
         ''')
     _seed_foods()
     apply_seed_sql()
 
 
 def _seed_foods():
+    """Corre UNA SOLA VEZ en toda la vida del DB (flag en tabla meta).
+    Si el usuario borra alimentos, no vuelven a aparecer en el próximo restart."""
     with get_conn() as conn:
-        count = conn.execute('SELECT COUNT(*) FROM foods').fetchone()[0]
-        if count == 0:
-            conn.executemany(
-                'INSERT OR IGNORE INTO foods (name, kcal, protein, fat, carbs) VALUES (?,?,?,?,?)',
-                SEED_FOODS
-            )
+        already = conn.execute(
+            "SELECT value FROM meta WHERE key='foods_seeded'"
+        ).fetchone()
+        if already:
+            return  # Ya se ejecutó alguna vez → no tocar nada
+        conn.executemany(
+            'INSERT OR IGNORE INTO foods (name, kcal, protein, fat, carbs) VALUES (?,?,?,?,?)',
+            SEED_FOODS
+        )
+        conn.execute("INSERT OR REPLACE INTO meta VALUES ('foods_seeded', '1')")
 
 
 def apply_seed_sql():
