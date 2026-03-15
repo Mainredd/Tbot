@@ -78,29 +78,61 @@ async def read_label_with_claude(image_bytes: bytes) -> dict | None:
         img_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
         resp = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=400,
+            max_tokens=600,
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64}},
                 {"type": "text", "text":
-                    """Analizá esta etiqueta nutricional argentina/latinoamericana. Seguí estos pasos:
+                    """Sos un experto en leer etiquetas nutricionales de Argentina/Latinoamérica.
 
-1. Identificá el nombre del producto.
-2. Buscá si hay una columna "por 100g" o "cada 100g" — si existe, usá ESE valor directamente.
-3. Si solo hay "por porción", identificá el tamaño de porción en gramos y convertí:
-   valor_100g = valor_porción × 100 / tamaño_porción_g
-4. Buscá: Calorías/Energía (kcal), Proteínas, Grasas totales, Hidratos/Carbohidratos.
-   Ignorá azúcares, fibra, sodio, grasas saturadas para el JSON.
+PASO 1 — Tamaño de porción:
+- Buscá "Tamaño de la porción" o "Porción" en gramos. Ejemplo: "60g", "30 g", "25g".
+- Leé el número con cuidado (60 ≠ 6, 30 ≠ 3).
 
-Devolvé SOLO este JSON sin markdown ni texto extra:
-{"food_name":"nombre","kcal":0,"protein":0,"fat":0,"carbs":0}
+PASO 2 — Columna a usar:
+- Si hay columna "por 100g" o "cada 100g": usá ESE valor directamente.
+- Si solo hay "por porción": convertí con: valor_100g = valor_porción × 100 ÷ tamaño_porción_g
 
-Todos los valores deben ser por 100g. Solo números sin unidades."""
+PASO 3 — Energía (MUY IMPORTANTE):
+- Las etiquetas argentinas muestran AMBOS: "86 kcal = 361 kJ" o similar.
+- kJ (kilojoules) ≠ kcal (kilocalorías). 1 kcal ≈ 4.18 kJ.
+- SIEMPRE usá el valor en KCAL (el número más chico). NUNCA uses el kJ como kcal.
+- Ejemplo correcto: "86 kcal = 361 kJ" → kcal = 86 (NO 361)
+
+PASO 4 — Nutrientes:
+- Proteínas (o "Proteína"): g
+- Grasas totales (o "Lípidos totales"): g — NO confundas con grasas saturadas
+- Hidratos de carbono totales (o "Carbohidratos"): g
+- Ignorá: azúcares, fibra, sodio, colesterol, grasas saturadas/trans para el JSON
+
+PASO 5 — Layout de 2 columnas:
+- Muchas etiquetas argentinas dividen los nutrientes en 2 bloques lado a lado.
+- Bloque izquierdo: energía + carbohidratos + proteínas
+- Bloque derecho: grasas + fibra + sodio
+- Leé los dos bloques para obtener todos los valores.
+
+Devolvé SOLO este JSON (sin markdown, sin texto extra, sin explicación):
+{"food_name":"nombre del producto","portion_g":0,"kcal_per_portion":0,"kcal":0,"protein":0,"fat":0,"carbs":0}
+
+Donde:
+- portion_g: tamaño de porción en gramos (0 si hay columna 100g directa)
+- kcal_per_portion: kcal por porción antes de convertir (0 si hay columna 100g)
+- kcal, protein, fat, carbs: todos POR 100g"""
                 }
             ]}]
         )
         raw = resp.content[0].text.strip()
         raw = re.sub(r'```json?\n?', '', raw).strip('`').strip()
-        return json.loads(raw)
+        data = json.loads(raw)
+        # Validación: si portion_g > 0, verificar que la conversión sea coherente
+        portion_g = float(data.get('portion_g', 0))
+        kcal_per_portion = float(data.get('kcal_per_portion', 0))
+        kcal_100g = float(data.get('kcal', 0))
+        if portion_g > 0 and kcal_per_portion > 0:
+            expected_100g = kcal_per_portion * 100 / portion_g
+            # Si el valor devuelto difiere >20% del esperado, recalcular
+            if kcal_100g <= 0 or abs(kcal_100g - expected_100g) / expected_100g > 0.20:
+                data['kcal'] = round(expected_100g, 1)
+        return data
     except Exception as e:
         logging.error(f"Label read error: {e}")
         return None
@@ -321,20 +353,74 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
 
+    # Interceptar edición de macros de etiqueta
+    if context.user_data.get('awaiting_label_macros'):
+        context.user_data['awaiting_label_macros'] = False
+        pending = context.user_data.get('pending_label')
+        if pending:
+            try:
+                parts = text.replace(',', '.').split()
+                vals = [float(p) for p in parts if re.match(r'^\d+(\.\d+)?$', p)]
+                if len(vals) < 4:
+                    raise ValueError
+                pending['kcal']    = round(vals[0], 1)
+                pending['protein'] = round(vals[1], 1)
+                pending['fat']     = round(vals[2], 1)
+                pending['carbs']   = round(vals[3], 1)
+                keyboard = [
+                    [
+                        InlineKeyboardButton("✅ Guardar",       callback_data="label_save"),
+                        InlineKeyboardButton("✏ Editar macros",  callback_data="label_edit_macros"),
+                    ],
+                    [
+                        InlineKeyboardButton("✏ Cambiar nombre", callback_data="label_rename"),
+                        InlineKeyboardButton("❌ Cancelar",       callback_data="label_cancel"),
+                    ],
+                ]
+                await update.message.reply_text(
+                    f"📋 *{pending['food_name']}* (por 100g)\n\n"
+                    f"🔥 {pending['kcal']} kcal\n"
+                    f"🥩 {pending['protein']}g proteína\n"
+                    f"🫒 {pending['fat']}g grasas\n"
+                    f"🍚 {pending['carbs']}g carbos\n\n"
+                    "¿Guardamos?",
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            except (ValueError, IndexError):
+                context.user_data['awaiting_label_macros'] = True
+                await update.message.reply_text(
+                    "❌ Formato incorrecto. Mandá 4 números separados por espacios:\n"
+                    "`kcal proteina grasa carbo`\n"
+                    "Ejemplo: `143 27 4 0`",
+                    parse_mode='Markdown'
+                )
+        else:
+            await update.message.reply_text("Expiró. Volvé a mandar la foto.")
+        return
+
     # Interceptar renombre de etiqueta
     if context.user_data.get('awaiting_label_rename'):
         context.user_data['awaiting_label_rename'] = False
         pending = context.user_data.get('pending_label')
         if pending:
             pending['food_name'] = text
-            keyboard = [[
-                InlineKeyboardButton("✅ Guardar en biblioteca", callback_data="label_save"),
-                InlineKeyboardButton("❌ Cancelar",               callback_data="label_cancel"),
-            ]]
+            keyboard = [
+                [
+                    InlineKeyboardButton("✅ Guardar",       callback_data="label_save"),
+                    InlineKeyboardButton("✏ Editar macros",  callback_data="label_edit_macros"),
+                ],
+                [
+                    InlineKeyboardButton("❌ Cancelar",       callback_data="label_cancel"),
+                ],
+            ]
             await update.message.reply_text(
-                f"📋 Listo, guardar como:\n\n"
-                f"*{text}* (por 100g)\n"
-                f"{macros_line(pending['kcal'], pending['protein'], pending['fat'], pending['carbs'])}",
+                f"📋 *{text}* (por 100g)\n\n"
+                f"🔥 {pending['kcal']} kcal\n"
+                f"🥩 {pending['protein']}g proteína\n"
+                f"🫒 {pending['fat']}g grasas\n"
+                f"🍚 {pending['carbs']}g carbos\n\n"
+                "¿Guardamos?",
                 parse_mode='Markdown',
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
@@ -573,17 +659,31 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data['food_name'] = caption
 
     context.user_data['pending_label'] = data
-    keyboard = [[
-        InlineKeyboardButton("✅ Guardar en biblioteca", callback_data="label_save"),
-        InlineKeyboardButton("✏ Cambiar nombre",         callback_data="label_rename"),
-        InlineKeyboardButton("❌ Cancelar",               callback_data="label_cancel"),
-    ]]
+    portion_g = data.get('portion_g', 0)
+    kcal_pp   = data.get('kcal_per_portion', 0)
+    source_note = (
+        f"\n_Porción leída: {portion_g}g → convertido a /100g_"
+        if portion_g and portion_g > 0 else
+        "\n_Valores tomados directamente de columna /100g_"
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Guardar",          callback_data="label_save"),
+            InlineKeyboardButton("✏ Editar macros",     callback_data="label_edit_macros"),
+        ],
+        [
+            InlineKeyboardButton("✏ Cambiar nombre",    callback_data="label_rename"),
+            InlineKeyboardButton("❌ Cancelar",          callback_data="label_cancel"),
+        ],
+    ]
     await thinking.edit_text(
-        f"📋 Encontré:\n\n"
-        f"*{data['food_name']}* (por 100g)\n"
-        f"🔥 {data['kcal']} kcal  |  🥩 {data['protein']}g prot  |  🫒 {data['fat']}g grasas  |  🍚 {data['carbs']}g carbos\n\n"
-        "¿Guardamos en la biblioteca?\n"
-        "_Tip: podés mandar la foto con el nombre como texto (caption) para nombrarlo directo._",
+        f"📋 *{data['food_name']}* (por 100g)\n\n"
+        f"🔥 {data['kcal']} kcal\n"
+        f"🥩 {data['protein']}g proteína\n"
+        f"🫒 {data['fat']}g grasas\n"
+        f"🍚 {data['carbs']}g carbos"
+        f"{source_note}\n\n"
+        "¿Son correctos los valores?",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -632,6 +732,22 @@ async def food_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
 
+    elif data == 'label_edit_macros':
+        if 'pending_label' not in context.user_data:
+            await query.edit_message_text("Expiró. Volvé a mandar la foto.")
+            return
+        context.user_data['awaiting_label_macros'] = True
+        p = context.user_data['pending_label']
+        await query.edit_message_text(
+            f"✏ *Editar macros de {p['food_name']}*\n\n"
+            f"Valores actuales (por 100g):\n"
+            f"  🔥 {p['kcal']} kcal  |  🥩 {p['protein']}g  |  🫒 {p['fat']}g  |  🍚 {p['carbs']}g\n\n"
+            "Mandame los valores corregidos en este formato:\n"
+            "`kcal proteina grasa carbo`\n\n"
+            "Ejemplo: `143 27 4 0`",
+            parse_mode='Markdown'
+        )
+
     elif data == 'label_rename':
         if 'pending_label' not in context.user_data:
             await query.edit_message_text("Expiró. Volvé a mandar la foto.")
@@ -644,6 +760,7 @@ async def food_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == 'label_cancel':
         context.user_data.pop('pending_label', None)
         context.user_data.pop('awaiting_label_rename', None)
+        context.user_data.pop('awaiting_label_macros', None)
         await query.edit_message_text("❌ Cancelado.")
 
     elif data == 'library_add_confirm':
