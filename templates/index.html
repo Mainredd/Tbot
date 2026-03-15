@@ -266,6 +266,8 @@
     .goal-bar { height: 100%; border-radius: 4px; transition: width 0.5s ease; max-width: 100%; }
     .goal-bar.kcal { background: var(--orange); }
     .goal-bar.prot { background: #e57373; }
+    .goal-bar.fat  { background: #ffd54f; }
+    .goal-bar.carbs{ background: #81c784; }
     .goal-bar.over { background: var(--accent); }
     .goal-pct { width: 40px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
 
@@ -463,6 +465,16 @@
             <span class="goal-label">🥩 Proteínas</span>
             <div class="goal-bar-wrap"><div class="goal-bar prot" id="gb-prot-{{ user.id }}" style="width:0%"></div></div>
             <span class="goal-pct" id="gp-prot-{{ user.id }}">0%</span>
+          </div>
+          <div class="goal-row">
+            <span class="goal-label">🫒 Grasas</span>
+            <div class="goal-bar-wrap"><div class="goal-bar fat" id="gb-fat-{{ user.id }}" style="width:0%"></div></div>
+            <span class="goal-pct" id="gp-fat-{{ user.id }}">0%</span>
+          </div>
+          <div class="goal-row">
+            <span class="goal-label">🍚 Carbos</span>
+            <div class="goal-bar-wrap"><div class="goal-bar carbs" id="gb-carbs-{{ user.id }}" style="width:0%"></div></div>
+            <span class="goal-pct" id="gp-carbs-{{ user.id }}">0%</span>
           </div>
         </div>
         <!-- Meals -->
@@ -694,8 +706,10 @@
   const EXERCISES_BY_DAY = {{ exercises_by_day | tojson }};
   const USERS = {{ users | tojson }};
   const MEAL_EMOJIS = { desayuno:'🌅', almuerzo:'☀️', merienda:'🍎', cena:'🌙', general:'🍽' };
-  const KCAL_GOAL = 2000;
-  const PROT_GOAL = 150;
+  const KCAL_GOAL  = 2000;
+  const PROT_GOAL  = 150;
+  const FAT_GOAL   = 65;
+  const CARBS_GOAL = 250;
 
   let currentPanel = 'sesiones';
   let weekChartInstance = null;
@@ -863,18 +877,30 @@
       `<span class="stat-badge">${logs.length} registros</span>`;
 
     // Progress bars
-    const kPct = Math.min(Math.round(totKcal / KCAL_GOAL * 100), 100);
-    const pPct = Math.min(Math.round(totProt / PROT_GOAL * 100), 100);
-    const kOver = totKcal > KCAL_GOAL;
-    const pOver = totProt > PROT_GOAL;
+    const kPct  = Math.min(Math.round(totKcal  / KCAL_GOAL  * 100), 100);
+    const pPct  = Math.min(Math.round(totProt  / PROT_GOAL  * 100), 100);
+    const fPct  = Math.min(Math.round(totFat   / FAT_GOAL   * 100), 100);
+    const cPct  = Math.min(Math.round(totCarbs / CARBS_GOAL * 100), 100);
+    const kOver = totKcal  > KCAL_GOAL;
+    const pOver = totProt  > PROT_GOAL;
+    const fOver = totFat   > FAT_GOAL;
+    const cOver = totCarbs > CARBS_GOAL;
     const kBar = document.getElementById(`gb-kcal-${userId}`);
     const pBar = document.getElementById(`gb-prot-${userId}`);
+    const fBar = document.getElementById(`gb-fat-${userId}`);
+    const cBar = document.getElementById(`gb-carbs-${userId}`);
     kBar.style.width = kPct + '%';
     kBar.className = 'goal-bar kcal' + (kOver ? ' over' : '');
     pBar.style.width = pPct + '%';
     pBar.className = 'goal-bar prot' + (pOver ? ' over' : '');
-    document.getElementById(`gp-kcal-${userId}`).textContent = kPct + '%';
-    document.getElementById(`gp-prot-${userId}`).textContent = pPct + '%';
+    fBar.style.width = fPct + '%';
+    fBar.className = 'goal-bar fat'  + (fOver ? ' over' : '');
+    cBar.style.width = cPct + '%';
+    cBar.className = 'goal-bar carbs'+ (cOver ? ' over' : '');
+    document.getElementById(`gp-kcal-${userId}`).textContent  = kPct + '%';
+    document.getElementById(`gp-prot-${userId}`).textContent  = pPct + '%';
+    document.getElementById(`gp-fat-${userId}`).textContent   = fPct + '%';
+    document.getElementById(`gp-carbs-${userId}`).textContent = cPct + '%';
 
     const container = document.getElementById(`meals-${userId}`);
     if (!logs.length) { container.innerHTML = '<div class="empty-state">Sin registros este día.</div>'; return; }

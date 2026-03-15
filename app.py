@@ -1,7 +1,10 @@
 import json
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from flask import Flask, render_template, request, jsonify
+
+AR = ZoneInfo("America/Argentina/Buenos_Aires")
 from database import (
     get_conn, init_db,
     create_session_with_date, log_exercise, update_exercise,
@@ -214,7 +217,7 @@ def api_food_week():
     user_id = request.args.get('user_id', type=int)
     if not user_id:
         return jsonify({'error': 'user_id requerido'}), 400
-    today = datetime.now().date()
+    today = datetime.now(AR).date()
     start = today - timedelta(days=6)
     data = get_food_week_summary(user_id, start.strftime('%Y-%m-%d'))
     # Rellenar días sin datos con 0

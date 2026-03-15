@@ -141,17 +141,23 @@ async def search_off(name: str) -> dict | None:
                     "fields": "product_name,nutriments",
                 }
             )
+            query_words = [w for w in name.lower().split() if len(w) > 2]
             for product in resp.json().get("products", []):
                 n = product.get("nutriments", {})
                 kcal = n.get("energy-kcal_100g") or n.get("energy_100g", 0)
-                if kcal and float(kcal) > 0:
-                    return {
-                        "name":    product.get("product_name", name),
-                        "kcal":    round(float(kcal), 1),
-                        "protein": round(float(n.get("proteins_100g",       0)), 1),
-                        "fat":     round(float(n.get("fat_100g",            0)), 1),
-                        "carbs":   round(float(n.get("carbohydrates_100g",  0)), 1),
-                    }
+                if not kcal or float(kcal) <= 0:
+                    continue
+                pname = (product.get("product_name") or "").lower()
+                # Validar relevancia: al menos 1 palabra del query debe estar en el nombre
+                if not any(w in pname for w in query_words):
+                    continue
+                return {
+                    "name":    product.get("product_name", name),
+                    "kcal":    round(float(kcal), 1),
+                    "protein": round(float(n.get("proteins_100g",       0)), 1),
+                    "fat":     round(float(n.get("fat_100g",            0)), 1),
+                    "carbs":   round(float(n.get("carbohydrates_100g",  0)), 1),
+                }
     except Exception as e:
         logging.error(f"OFF search error: {e}")
     return None
