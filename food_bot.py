@@ -241,8 +241,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fat     = round(float(parsed.get('fat',     0)), 1)
         carbs   = round(float(parsed.get('carbs',   0)), 1)
 
-        # ¿Ya existe en la biblioteca?
-        existing = db.get_food_by_name(food_name)
+        # ¿Ya existe en la biblioteca? (match estricto, no por palabras sueltas)
+        existing = db.get_food_exact(food_name)
         if existing:
             await thinking.edit_text(
                 f"📚 *{existing['name']}* ya está en tu biblioteca.\n"

@@ -338,6 +338,26 @@ def get_food_by_name(name: str):
     return None
 
 
+def get_food_exact(name: str):
+    """Match exacto o frase completa como substring. No parte por palabras."""
+    q = name.lower().strip()
+    with get_conn() as conn:
+        # 1. Exact match
+        row = conn.execute(
+            'SELECT id, name, kcal, protein, fat, carbs FROM foods WHERE LOWER(name) = ?', (q,)
+        ).fetchone()
+        if row:
+            return _food_row(row)
+        # 2. La frase completa es substring del nombre en DB (o viceversa)
+        row = conn.execute(
+            'SELECT id, name, kcal, protein, fat, carbs FROM foods WHERE LOWER(name) LIKE ?',
+            (f'%{q}%',)
+        ).fetchone()
+        if row:
+            return _food_row(row)
+    return None
+
+
 def add_food(name, kcal, protein, fat, carbs):
     with get_conn() as conn:
         cursor = conn.execute(
