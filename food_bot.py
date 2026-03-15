@@ -681,30 +681,36 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo_bytes = bytes(await photo_file.download_as_bytearray())
 
     data = await read_label_with_claude(photo_bytes)
-
-    # Aplicar caption ANTES de validar: si el usuario mandó nombre, úsalo aunque Claude no leyera el producto
     caption = (update.message.caption or '').strip()
+
+    # Si Claude falló completamente pero hay caption → dejar entrar con macros en 0 para editar
+    if not data and caption:
+        data = {'food_name': caption, 'kcal': 0, 'protein': 0, 'fat': 0, 'carbs': 0,
+                'portion_g': 0, 'kcal_per_portion': 0}
+
+    # Aplicar caption como nombre (tiene prioridad sobre lo que Claude leyó)
     if data and caption:
         data['food_name'] = caption
 
-    # Fallar solo si no hay datos en absoluto o sin nombre Y sin caption
-    has_macros = data and data.get('kcal', 0) > 0
-    has_name   = data and data.get('food_name') and data.get('food_name') != 'desconocido'
-    if not has_macros and not (caption and data):
+    has_macros = bool(data and data.get('kcal', 0) > 0)
+    has_name   = bool(data and data.get('food_name') and data.get('food_name') != 'desconocido')
+
+    # Sin datos Y sin caption → error total
+    if not data:
         await thinking.edit_text(
-            "⚠️ No pude leer la etiqueta bien.\n\n"
-            "Podés:\n"
-            "• Intentar con mejor luz / menos ángulo\n"
-            "• Ingresar los valores manualmente con:\n"
+            "⚠️ No pude leer la etiqueta.\n\n"
+            "• Intentá con mejor luz / menos ángulo\n"
+            "• O ingresá los valores manualmente:\n"
             "`agrega <nombre> 342kcal 7prot 0grasas 78carbos`",
             parse_mode='Markdown'
         )
         return
-    if not has_name and not caption:
+
+    # Tenemos datos pero sin nombre → pedir caption
+    if not has_name:
         await thinking.edit_text(
-            "⚠️ Leí los macros pero no el nombre del producto.\n\n"
-            "Mandá la foto de nuevo con el nombre como texto adjunto (caption).\n"
-            "Por ejemplo: mandá la foto y escribí `Arroz integral` al mismo tiempo.",
+            "⚠️ Leí los macros pero no el nombre.\n"
+            "Volvé a mandar la foto con el nombre como texto adjunto (caption).",
             parse_mode='Markdown'
         )
         return
