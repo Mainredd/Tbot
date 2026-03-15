@@ -109,7 +109,9 @@ PASO 3 — Leé los nutrientes por porción:
   - Energía/Valor energético: si dice "137 kcal = 573 kJ" → kcal = 137 (el CHICO, nunca el kJ)
   - Carbohidratos/Hidratos de carbono: el primer número en gramos de esa fila (NO azúcares)
   - Proteínas: número en gramos de esa fila
-  - Grasas totales/Lípidos totales: el primer número en gramos de esa fila (NO saturadas)
+  - Grasas totales/Lípidos totales: el número que aparece DESPUÉS de "Grasas totales" o "Lípidos totales".
+    IMPORTANTE: ignorá completamente "Grasas saturadas", "Grasas trans", "Grasas monoinsaturadas", "Grasas poliinsaturadas".
+    Solo el valor de GRASAS TOTALES. Ejemplo: "Grasas totales 5.4 g; Grasas saturadas 3.3 g" → fat = 5.4
 
 PASO 4 — Columna /100g:
   Solo aplica para formato TABLA. Si existe columna "100g", leerla también.
