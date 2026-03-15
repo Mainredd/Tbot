@@ -240,21 +240,16 @@ Devolvé SOLO este JSON sin markdown:
 
 async def estimate_macros_with_claude(food_name: str) -> dict | None:
     """
-    Promedia múltiples fuentes online (USDA + OFF) para mayor precisión.
+    Busca en USDA para mayor precisión.
     Solo usa estimación de Claude como último recurso.
     """
-    # 1. Buscar en USDA y OFF en paralelo
-    usda_results, off_results = await asyncio.gather(
-        search_usda_multi(food_name),
-        search_off_multi(food_name),
-    )
+    # 1. Buscar en USDA
+    usda_results = await search_usda_multi(food_name)
 
-    all_results = usda_results + off_results
-    if all_results:
-        avg = _average_results(all_results)
+    if usda_results:
+        avg = _average_results(usda_results)
         n_usda = len(usda_results)
-        n_off  = len(off_results)
-        source_tag = f"promedio {n_usda} USDA + {n_off} OFF" if n_off else f"promedio {n_usda} USDA"
+        source_tag = f"promedio {n_usda} USDA"
         logging.info(f"[estimate] '{food_name}' → {source_tag}: {avg}")
         return {
             "name":      food_name,
@@ -355,25 +350,49 @@ async def search_usda_multi(food_name_es: str) -> list[dict]:
 
     filter_words = food_keywords if food_keywords else [main_keyword]
 
-    results = []
-    for food in foods:
-        desc = food.get("description", "").lower()
-        # Rechazar si ninguna keyword específica del alimento aparece en la descripción
-        if filter_words and not any(w in desc for w in filter_words):
-            continue
-        nutrients = {n["nutrientId"]: n["value"] for n in food.get("foodNutrients", [])}
-        kcal = float(nutrients.get(1008, 0))
-        if kcal <= 0:
-            continue
-        results.append({
-            "source":  food.get("description", english_name),
-            "kcal":    kcal,
-            "protein": float(nutrients.get(1003, 0)),
-            "fat":     float(nutrients.get(1004, 0)),
-            "carbs":   float(nutrients.get(1005, 0)),
-        })
-        if len(results) >= 8:
-            break
+    def _parse_foods(foods_list):
+        results = []
+        for food in foods_list:
+            desc = food.get("description", "").lower()
+            if not any(w in desc for w in filter_words):
+                continue
+            nutrients = {n["nutrientId"]: n["value"] for n in food.get("foodNutrients", [])}
+            kcal = float(nutrients.get(1008, 0))
+            if kcal <= 0:
+                continue
+            results.append({
+                "source":  food.get("description", english_name),
+                "kcal":    kcal,
+                "protein": float(nutrients.get(1003, 0)),
+                "fat":     float(nutrients.get(1004, 0)),
+                "carbs":   float(nutrients.get(1005, 0)),
+            })
+            if len(results) >= 8:
+                break
+        return results
+
+    # Intento 1: top 20 resultados
+    results = _parse_foods(foods)
+
+    # Intento 2: si no hay resultados, ampliar a top 100 (USDA a veces rankea mal)
+    if not results:
+        try:
+            logging.info(f"[USDA] 0 resultados en top 20, ampliando a 100...")
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp2 = await client.get(
+                    "https://api.nal.usda.gov/fdc/v1/foods/search",
+                    params={
+                        "query": main_keyword,
+                        "api_key": api_key,
+                        "dataType": "Foundation,SR Legacy",
+                        "pageSize": 100,
+                    }
+                )
+            foods2 = resp2.json().get("foods", [])
+            results = _parse_foods(foods2)
+            logging.info(f"[USDA] Ampliado → {len(results)} resultados")
+        except Exception as e:
+            logging.error(f"[USDA] error en segundo intento: {e}")
 
     logging.info(f"[USDA] '{english_name}' filter={filter_words} → {len(results)} resultados: {[r['source'][:35] for r in results]}")
     return results
@@ -752,24 +771,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                            'protein': protein, 'fat': fat, 'carbs': carbs, 'meal_type': meal_type})
             continue
 
-        # Buscar en Open Food Facts
-        off = await search_off(food_name)
-        if off:
-            kcal, protein, fat, carbs = calc_macros(off, qty)
-            db.log_food_with_date(user_id, off['name'], qty, kcal, protein, fat, carbs, meal_type, today_ar)
-            logged.append({'name': off['name'], 'qty': qty, 'kcal': kcal,
-                           'protein': protein, 'fat': fat, 'carbs': carbs, 'meal_type': meal_type})
+        # Buscar en USDA o estimar con Claude
+        est = await estimate_macros_with_claude(food_name)
+        if est:
+            kcal, protein, fat, carbs = calc_macros(est, qty)
+            db.log_food_with_date(user_id, food_name, qty, kcal, protein, fat, carbs, meal_type, today_ar)
+            logged.append({'name': food_name, 'qty': qty, 'kcal': kcal,
+                           'protein': protein, 'fat': fat, 'carbs': carbs,
+                           'meal_type': meal_type, 'estimated': est.get('estimated', False)})
         else:
-            # Fallback: Claude estima macros
-            est = await estimate_macros_with_claude(food_name)
-            if est:
-                kcal, protein, fat, carbs = calc_macros(est, qty)
-                db.log_food_with_date(user_id, food_name, qty, kcal, protein, fat, carbs, meal_type, today_ar)
-                logged.append({'name': food_name, 'qty': qty, 'kcal': kcal,
-                               'protein': protein, 'fat': fat, 'carbs': carbs,
-                               'meal_type': meal_type, 'estimated': True})
-            else:
-                not_found.append({'name': food_name, 'qty': qty})
+            not_found.append({'name': food_name, 'qty': qty})
 
     # ── Respuesta ─────────────────────────────────────────────────────────────
     if not logged and not not_found:
