@@ -153,6 +153,11 @@
     .macro-prot  { color: #e57373; }
     .macro-fat   { color: #ffd54f; }
     .macro-carbs { color: #81c784; }
+    .macro-goal-val {
+      font-size: 0.65rem; font-weight: 400; opacity: 0.45;
+      cursor: pointer; transition: opacity 0.15s;
+    }
+    .macro-goal-val:hover { opacity: 0.85; }
 
     /* ── Comidas: Meal groups ── */
     .meal-group { border-bottom: 1px solid rgba(255,255,255,0.04); }
@@ -449,10 +454,22 @@
         </div>
         <!-- Macro totals -->
         <div class="macro-totals" id="macro-totals-{{ user.id }}">
-          <div class="macro-item"><div class="macro-value macro-kcal" id="m-kcal-{{ user.id }}">0</div><div class="macro-label">kcal</div></div>
-          <div class="macro-item"><div class="macro-value macro-prot" id="m-prot-{{ user.id }}">0g</div><div class="macro-label">proteínas</div></div>
-          <div class="macro-item"><div class="macro-value macro-fat"  id="m-fat-{{ user.id }}">0g</div><div class="macro-label">grasas</div></div>
-          <div class="macro-item"><div class="macro-value macro-carbs" id="m-carbs-{{ user.id }}">0g</div><div class="macro-label">carbos</div></div>
+          <div class="macro-item">
+            <div class="macro-value macro-kcal"><span id="m-kcal-{{ user.id }}">0</span> <span class="macro-goal-val" onclick="editGoal({{ user.id }},'kcal','Kcal')" id="mg-kcal-{{ user.id }}">/ 2000</span></div>
+            <div class="macro-label">kcal</div>
+          </div>
+          <div class="macro-item">
+            <div class="macro-value macro-prot"><span id="m-prot-{{ user.id }}">0g</span> <span class="macro-goal-val" onclick="editGoal({{ user.id }},'prot','Proteínas (g)')" id="mg-prot-{{ user.id }}">/ 150</span></div>
+            <div class="macro-label">proteínas</div>
+          </div>
+          <div class="macro-item">
+            <div class="macro-value macro-fat"><span id="m-fat-{{ user.id }}">0g</span> <span class="macro-goal-val" onclick="editGoal({{ user.id }},'fat','Grasas (g)')" id="mg-fat-{{ user.id }}">/ 65</span></div>
+            <div class="macro-label">grasas</div>
+          </div>
+          <div class="macro-item">
+            <div class="macro-value macro-carbs"><span id="m-carbs-{{ user.id }}">0g</span> <span class="macro-goal-val" onclick="editGoal({{ user.id }},'carbs','Carbos (g)')" id="mg-carbs-{{ user.id }}">/ 250</span></div>
+            <div class="macro-label">carbos</div>
+          </div>
         </div>
         <!-- Goal progress bars -->
         <div class="macro-goals">
@@ -706,10 +723,27 @@
   const EXERCISES_BY_DAY = {{ exercises_by_day | tojson }};
   const USERS = {{ users | tojson }};
   const MEAL_EMOJIS = { desayuno:'🌅', almuerzo:'☀️', merienda:'🍎', cena:'🌙', general:'🍽' };
-  const KCAL_GOAL  = 2000;
-  const PROT_GOAL  = 150;
-  const FAT_GOAL   = 65;
-  const CARBS_GOAL = 250;
+  const DEFAULT_GOALS = { kcal: 2000, prot: 150, fat: 65, carbs: 250 };
+
+  function getGoals(userId) {
+    try {
+      const saved = localStorage.getItem(`goals_${userId}`);
+      return saved ? { ...DEFAULT_GOALS, ...JSON.parse(saved) } : { ...DEFAULT_GOALS };
+    } catch(e) { return { ...DEFAULT_GOALS }; }
+  }
+  function saveGoals(userId, goals) {
+    localStorage.setItem(`goals_${userId}`, JSON.stringify(goals));
+  }
+  function editGoal(userId, key, label) {
+    const goals = getGoals(userId);
+    const val = prompt(`Objetivo de ${label}:`, goals[key]);
+    if (val === null) return;
+    const num = parseFloat(val);
+    if (isNaN(num) || num <= 0) { toast('Valor inválido', false); return; }
+    goals[key] = num;
+    saveGoals(userId, goals);
+    loadFoodDay();
+  }
 
   let currentPanel = 'sesiones';
   let weekChartInstance = null;
@@ -871,22 +905,28 @@
     const totFat  = logs.reduce((s,l)=>s+l.fat,0);
     const totCarbs= logs.reduce((s,l)=>s+l.carbs,0);
 
+    const goals = getGoals(userId);
+
     document.getElementById(`m-kcal-${userId}`).textContent  = Math.round(totKcal);
     document.getElementById(`m-prot-${userId}`).textContent  = fmt(totProt)+'g';
     document.getElementById(`m-fat-${userId}`).textContent   = fmt(totFat)+'g';
     document.getElementById(`m-carbs-${userId}`).textContent = fmt(totCarbs)+'g';
+    document.getElementById(`mg-kcal-${userId}`).textContent  = '/ ' + goals.kcal;
+    document.getElementById(`mg-prot-${userId}`).textContent  = '/ ' + goals.prot;
+    document.getElementById(`mg-fat-${userId}`).textContent   = '/ ' + goals.fat;
+    document.getElementById(`mg-carbs-${userId}`).textContent = '/ ' + goals.carbs;
     document.getElementById(`food-stats-${userId}`).innerHTML =
       `<span class="stat-badge">${logs.length} registros</span>`;
 
     // Progress bars
-    const kPct  = Math.min(Math.round(totKcal  / KCAL_GOAL  * 100), 100);
-    const pPct  = Math.min(Math.round(totProt  / PROT_GOAL  * 100), 100);
-    const fPct  = Math.min(Math.round(totFat   / FAT_GOAL   * 100), 100);
-    const cPct  = Math.min(Math.round(totCarbs / CARBS_GOAL * 100), 100);
-    const kOver = totKcal  > KCAL_GOAL;
-    const pOver = totProt  > PROT_GOAL;
-    const fOver = totFat   > FAT_GOAL;
-    const cOver = totCarbs > CARBS_GOAL;
+    const kPct  = Math.min(Math.round(totKcal  / goals.kcal  * 100), 100);
+    const pPct  = Math.min(Math.round(totProt  / goals.prot  * 100), 100);
+    const fPct  = Math.min(Math.round(totFat   / goals.fat   * 100), 100);
+    const cPct  = Math.min(Math.round(totCarbs / goals.carbs * 100), 100);
+    const kOver = totKcal  > goals.kcal;
+    const pOver = totProt  > goals.prot;
+    const fOver = totFat   > goals.fat;
+    const cOver = totCarbs > goals.carbs;
     const kBar = document.getElementById(`gb-kcal-${userId}`);
     const pBar = document.getElementById(`gb-prot-${userId}`);
     const fBar = document.getElementById(`gb-fat-${userId}`);
@@ -1174,9 +1214,10 @@
           x: { ticks: { color: '#666' }, grid: { color: '#1a1a1a' } },
           y: {
             ticks: { color: '#666' }, grid: { color: '#1a1a1a' },
-            suggestedMax: KCAL_GOAL,
+            suggestedMax: (USERS.length ? getGoals(USERS[0].id).kcal : 2000),
             afterDataLimits(scale) {
-              scale.max = Math.max(scale.max, KCAL_GOAL * 1.1);
+              const g = USERS.length ? getGoals(USERS[0].id).kcal : 2000;
+              scale.max = Math.max(scale.max, g * 1.1);
             }
           }
         }
