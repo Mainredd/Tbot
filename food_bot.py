@@ -357,7 +357,11 @@ async def search_usda(food_name_es: str) -> dict | None:
         return None
 
     foods = data.get("foods", [])
-    # Primero intentar con coincidencia exacta de keywords de preparación
+    query_words = [w for w in english_name.lower().split() if len(w) > 3]
+
+    # Pasada 1 (strict): todos los keywords deben estar en la descripción
+    # Pasada 2 (loose):  al menos UNA palabra del query debe estar en la descripción
+    # Sin ninguna coincidencia de palabras → devolver None para evitar resultados irrelevantes
     for strict in [True, False]:
         for food in foods:
             nutrients = {n["nutrientId"]: n["value"] for n in food.get("foodNutrients", [])}
@@ -365,9 +369,19 @@ async def search_usda(food_name_es: str) -> dict | None:
             if kcal <= 0:
                 continue
             desc = food.get("description", "").lower()
-            if strict and keywords:
-                if not all(any(k in desc for k in [kw]) for kw in keywords[:2]):
-                    continue  # No coincide con la preparación → skip en primera pasada
+
+            if strict:
+                # Todas las keywords de preparación deben coincidir
+                if keywords and not all(kw in desc for kw in keywords[:2]):
+                    continue
+                # Además, al menos una palabra del query debe estar presente
+                if query_words and not any(w in desc for w in query_words):
+                    continue
+            else:
+                # Mínimo: al menos una palabra del query debe aparecer en la descripción
+                if query_words and not any(w in desc for w in query_words):
+                    continue
+
             return {
                 "name":    food_name_es,
                 "kcal":    round(kcal, 1),
