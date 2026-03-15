@@ -848,7 +848,9 @@
     return label ? `${label}, ${str}` : str;
   }
 
-  function isoDate(d) { return d.toISOString().split('T')[0]; }
+  function isoDate(d) {
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
 
   function changeDay(delta) {
     currentDate.setDate(currentDate.getDate() + delta);
