@@ -125,6 +125,16 @@ def init_db():
                 FOREIGN KEY (recipe_id) REFERENCES recipes(id),
                 FOREIGN KEY (food_id)   REFERENCES foods(id)
             );
+
+            CREATE TABLE IF NOT EXISTS user_goals (
+                user_id    INTEGER PRIMARY KEY,
+                kcal       REAL DEFAULT 0,
+                protein    REAL DEFAULT 0,
+                fat        REAL DEFAULT 0,
+                carbs      REAL DEFAULT 0,
+                notes      TEXT DEFAULT '',
+                FOREIGN KEY (user_id) REFERENCES users(telegram_id)
+            );
         ''')
     # Migration: add servings column to existing recipes tables
     with get_conn() as conn:
@@ -641,6 +651,29 @@ def get_food_week_summary(user_id: int, start_date: str):
                 for r in rows]
 
 
+def get_user_goals(user_id: int) -> dict:
+    with get_conn() as conn:
+        row = conn.execute(
+            'SELECT kcal, protein, fat, carbs, notes FROM user_goals WHERE user_id = ?',
+            (user_id,)
+        ).fetchone()
+    if row:
+        return {'kcal': row[0], 'protein': row[1], 'fat': row[2], 'carbs': row[3], 'notes': row[4] or ''}
+    return {'kcal': 0, 'protein': 0, 'fat': 0, 'carbs': 0, 'notes': ''}
+
+
+def set_user_goals(user_id: int, kcal: float, protein: float, fat: float, carbs: float, notes: str = ''):
+    with get_conn() as conn:
+        conn.execute(
+            '''INSERT INTO user_goals (user_id, kcal, protein, fat, carbs, notes)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                 kcal=excluded.kcal, protein=excluded.protein,
+                 fat=excluded.fat, carbs=excluded.carbs, notes=excluded.notes''',
+            (user_id, kcal, protein, fat, carbs, notes)
+        )
+
+
 def get_chat_context(user_id: int, today: str, week_start: str) -> dict:
     """Recopila datos del usuario para contexto del chat con Claude."""
     with get_conn() as conn:
@@ -683,9 +716,11 @@ def get_chat_context(user_id: int, today: str, week_start: str) -> dict:
         user_name = user_row[0] if user_row else 'Usuario'
 
     prs = get_all_prs(user_id)
+    goals = get_user_goals(user_id)
 
     return {
         'user_name': user_name,
+        'goals': goals,
         'food_today': [
             {'name': r[0], 'qty': r[1], 'kcal': r[2], 'prot': r[3], 'fat': r[4], 'carbs': r[5], 'meal': r[6]}
             for r in food_today

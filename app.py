@@ -12,7 +12,7 @@ from database import (
     delete_session, delete_exercise,
     get_all_foods, add_food, update_food, delete_food,
     log_food_with_date, get_food_logs_by_date, update_food_log, delete_food_log,
-    get_food_week_summary, get_chat_context,
+    get_food_week_summary, get_chat_context, get_user_goals, set_user_goals,
     get_all_recipes, get_recipe, create_recipe, update_recipe, delete_recipe,
 )
 from exercises import WORKOUTS
@@ -324,11 +324,33 @@ def api_chat():
         f"  {ex}: {kg} kg" for ex, kg in sorted(ctx['prs'].items())
     ) or '  (sin records)'
 
+    g = ctx['goals']
+    has_goals = g['kcal'] > 0 or g['protein'] > 0
+    if has_goals:
+        goals_line = f"  Kcal: {g['kcal']} | Prot: {g['protein']}g | Grasas: {g['fat']}g | Carbos: {g['carbs']}g"
+        if g['notes']:
+            goals_line += f"\n  Notas: {g['notes']}"
+        # calcular % cumplido hoy
+        def pct(actual, goal): return f"{actual:.0f}/{goal:.0f} ({actual/goal*100:.0f}%)" if goal > 0 else f"{actual:.0f}/—"
+        progress_line = (
+            f"  Progreso hoy → Kcal: {pct(today_totals[0], g['kcal'])} | "
+            f"Prot: {pct(today_totals[1], g['protein'])} | "
+            f"Grasas: {pct(today_totals[2], g['fat'])} | "
+            f"Carbos: {pct(today_totals[3], g['carbs'])}"
+        )
+    else:
+        goals_line = '  (no configurados — el usuario puede configurarlos en el panel de Objetivos)'
+        progress_line = ''
+
     system_prompt = f"""Sos un asistente personal de nutrición y fitness. Respondés en español, de forma concisa y directa.
 Sos parte de una app de seguimiento de gym y nutrición. Tenés acceso a los datos reales del usuario.
 
 USUARIO: {ctx['user_name']} (ID: {user_id})
 FECHA HOY: {today}
+
+── OBJETIVOS DIARIOS ──
+{goals_line}
+{progress_line}
 
 ── COMIDAS DE HOY ──
 {food_today_lines}
@@ -343,7 +365,8 @@ TOTAL HOY: {today_totals[0]:.0f} kcal | {today_totals[1]:.1f}g prot | {today_tot
 ── RECORDS PERSONALES (kg) ──
 {prs_lines}
 
-Usá estos datos para responder preguntas específicas. Si el usuario pregunta qué comió, cuántas calorías lleva, su progreso en el gym, sugerencias según sus datos, etc., respondé basándote en los datos reales.
+Usá estos datos para responder preguntas específicas. Cuando el usuario pregunta sobre sus objetivos, mostrá el progreso real comparado con la meta.
+Si no tiene objetivos configurados, podés ayudarlo a calcularlos (pedile peso, altura, edad, objetivo: definición/volumen/mantenimiento).
 Cuando no tengas datos suficientes, decilo claramente. No inventés valores."""
 
     ai = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
@@ -357,6 +380,24 @@ Cuando no tengas datos suficientes, decilo claramente. No inventés valores."""
     )
     reply = resp.content[0].text
     return jsonify({'reply': reply})
+
+
+@app.route('/api/goals/<int:user_id>', methods=['GET'])
+def api_get_goals(user_id):
+    return jsonify(get_user_goals(user_id))
+
+
+@app.route('/api/goals/<int:user_id>', methods=['POST'])
+def api_set_goals(user_id):
+    d = request.json
+    set_user_goals(user_id,
+        kcal=float(d.get('kcal', 0)),
+        protein=float(d.get('protein', 0)),
+        fat=float(d.get('fat', 0)),
+        carbs=float(d.get('carbs', 0)),
+        notes=d.get('notes', ''),
+    )
+    return jsonify({'ok': True})
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

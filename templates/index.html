@@ -444,13 +444,35 @@
       display: flex; flex-direction: column; height: calc(100vh - 200px); min-height: 400px;
     }
     .chat-user-row {
-      display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
     }
     .chat-user-row select {
       background: var(--surface); border: 1px solid var(--border);
       color: var(--text); padding: 7px 12px; border-radius: 8px;
       font-size: 0.85rem; outline: none;
     }
+    .goals-bar {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 8px 14px; margin-bottom: 10px; font-size: 0.8rem;
+    }
+    .goals-bar .goal-item { color: var(--muted); }
+    .goals-bar .goal-item b { color: var(--text); }
+    .goals-bar .goal-sep { color: var(--border); }
+    .goals-edit-btn {
+      margin-left: auto; background: none; border: 1px solid var(--border);
+      color: var(--muted); padding: 3px 10px; border-radius: 6px;
+      font-size: 0.75rem; cursor: pointer; transition: border-color 0.15s;
+    }
+    .goals-edit-btn:hover { border-color: var(--accent); color: var(--text); }
+    .goals-form {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+    }
+    .goals-form .gf-grid {
+      display: grid; grid-template-columns: repeat(4,1fr) 2fr; gap: 8px; margin-bottom: 8px;
+    }
+    .goals-form-actions { display: flex; gap: 8px; justify-content: flex-end; }
     .chat-messages {
       flex: 1; overflow-y: auto; padding: 16px;
       background: var(--surface); border: 1px solid var(--border);
@@ -906,9 +928,37 @@
     <div class="chat-wrap">
       <div class="chat-user-row">
         <span style="color:var(--muted);font-size:0.82rem;">Consultando como:</span>
-        <select id="chat-user">
+        <select id="chat-user" onchange="loadGoals()">
           {% for user in users %}<option value="{{ user.id }}">{{ user.name }}</option>{% endfor %}
         </select>
+      </div>
+
+      <!-- Barra de objetivos -->
+      <div class="goals-bar" id="goals-bar">
+        <span style="color:var(--muted);font-size:0.78rem;">🎯 Objetivos:</span>
+        <span class="goal-item" id="gb-kcal">—</span>
+        <span class="goal-sep">·</span>
+        <span class="goal-item" id="gb-prot">—</span>
+        <span class="goal-sep">·</span>
+        <span class="goal-item" id="gb-fat">—</span>
+        <span class="goal-sep">·</span>
+        <span class="goal-item" id="gb-carbs">—</span>
+        <button class="goals-edit-btn" onclick="toggleGoalsForm()">✏ Editar</button>
+      </div>
+
+      <!-- Formulario de objetivos (oculto por defecto) -->
+      <div class="goals-form" id="goals-form" style="display:none">
+        <div class="gf-grid">
+          <div class="field"><label>Kcal/día</label><input type="number" id="gf-kcal" placeholder="2000" /></div>
+          <div class="field"><label>Proteína (g)</label><input type="number" id="gf-prot" placeholder="150" /></div>
+          <div class="field"><label>Grasas (g)</label><input type="number" id="gf-fat" placeholder="70" /></div>
+          <div class="field"><label>Carbos (g)</label><input type="number" id="gf-carbs" placeholder="200" /></div>
+          <div class="field"><label>Notas</label><input type="text" id="gf-notes" placeholder="ej: definición, -0.5kg/sem" /></div>
+        </div>
+        <div class="goals-form-actions">
+          <button class="btn" onclick="toggleGoalsForm()">Cancelar</button>
+          <button class="btn btn-accent" onclick="saveGoals()">Guardar objetivos</button>
+        </div>
       </div>
       <div class="chat-messages" id="chat-messages">
         <div class="chat-empty" id="chat-empty">
@@ -1224,6 +1274,7 @@
     btn.textContent = btnLabel[name] || '+ Nuevo';
     btn.style.display = btnLabel[name] ? '' : 'none';
     if (name === 'comidas') { loadFoodDay(); loadWeekChart(); }
+    if (name === 'chat') { loadGoals(); }
   }
 
   function handleNewAction() {
@@ -1961,6 +2012,48 @@
 
   // Pre-cargar comidas si arranca en esa pestaña
   document.getElementById('date-display').textContent = formatDateDisplay(new Date(currentDate));
+
+  // ── Objetivos ─────────────────────────────────────────────────────────────
+  async function loadGoals() {
+    const uid = document.getElementById('chat-user').value;
+    const res = await fetch(`/api/goals/${uid}`);
+    const g = await res.json();
+    const set = (id, val, unit) => document.getElementById(id).innerHTML =
+      val > 0 ? `<b>${val}</b> ${unit}` : `<span style="color:var(--muted)">—</span>`;
+    set('gb-kcal', g.kcal, 'kcal');
+    set('gb-prot', g.protein, 'g prot');
+    set('gb-fat',  g.fat,  'g grasas');
+    set('gb-carbs',g.carbs,'g carbos');
+    document.getElementById('gf-kcal').value  = g.kcal  || '';
+    document.getElementById('gf-prot').value  = g.protein || '';
+    document.getElementById('gf-fat').value   = g.fat   || '';
+    document.getElementById('gf-carbs').value = g.carbs || '';
+    document.getElementById('gf-notes').value = g.notes || '';
+  }
+
+  function toggleGoalsForm() {
+    const f = document.getElementById('goals-form');
+    f.style.display = f.style.display === 'none' ? '' : 'none';
+  }
+
+  async function saveGoals() {
+    const uid = document.getElementById('chat-user').value;
+    const body = {
+      kcal:    parseFloat(document.getElementById('gf-kcal').value)  || 0,
+      protein: parseFloat(document.getElementById('gf-prot').value)  || 0,
+      fat:     parseFloat(document.getElementById('gf-fat').value)   || 0,
+      carbs:   parseFloat(document.getElementById('gf-carbs').value) || 0,
+      notes:   document.getElementById('gf-notes').value.trim(),
+    };
+    await fetch(`/api/goals/${uid}`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    await loadGoals();
+    toggleGoalsForm();
+    toast('Objetivos guardados');
+    _chatHistory = [];  // reset para que el próximo mensaje use los nuevos objetivos
+  }
 
   // ── Chat Asistente ────────────────────────────────────────────────────────
   let _chatHistory = [];
