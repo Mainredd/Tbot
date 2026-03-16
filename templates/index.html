@@ -918,11 +918,16 @@
       <div class="field"><label>Alimento</label>
         <select id="lf-food" onchange="onFoodSelect()">
           <option value="">— Elegí un alimento —</option>
-          {% for food in foods %}<option value="{{ food.id }}" data-kcal="{{ food.kcal }}" data-prot="{{ food.protein }}" data-fat="{{ food.fat }}" data-carbs="{{ food.carbs }}" data-name="{{ food.name }}">{{ food.name }}</option>{% endfor %}
+          {% if foods %}<optgroup label="Alimentos">{% for food in foods %}<option value="{{ food.id }}" data-kcal="{{ food.kcal }}" data-prot="{{ food.protein }}" data-fat="{{ food.fat }}" data-carbs="{{ food.carbs }}" data-name="{{ food.name }}">{{ food.name }}</option>{% endfor %}</optgroup>{% endif %}
+          {% if recipes %}<optgroup label="Comidas elaboradas">{% for r in recipes %}<option value="recipe_{{ r.id }}" data-kcal="{{ r.kcal }}" data-prot="{{ r.protein }}" data-fat="{{ r.fat }}" data-carbs="{{ r.carbs }}" data-name="{{ r.name }}" data-is-recipe="1" data-unit-g="{{ r.unit_g }}">{{ r.name }}</option>{% endfor %}</optgroup>{% endif %}
           <option value="__manual__">✏ Ingresar manualmente</option>
         </select>
       </div>
-      <div class="field"><label>Cantidad (gramos)</label><input type="number" id="lf-qty" placeholder="ej: 200" oninput="calcMacros()" /></div>
+      <div class="field">
+        <label id="lf-qty-label">Cantidad (gramos)</label>
+        <input type="number" id="lf-qty" placeholder="ej: 200" oninput="calcMacros()" />
+        <small id="lf-unit-hint" style="color:var(--muted);display:none;margin-top:4px;"></small>
+      </div>
       <div id="lf-manual-fields" style="display:none">
         <div class="fields-4">
           <div class="field"><label>Kcal/100g</label><input type="number" id="lf-m-kcal" placeholder="0" oninput="calcMacros()" /></div>
@@ -1354,28 +1359,44 @@
   function onFoodSelect() {
     const sel = document.getElementById('lf-food');
     const isManual = sel.value === '__manual__';
+    const opt = sel.value && !isManual ? sel.options[sel.selectedIndex] : null;
+    const isRecipe = opt?.dataset.isRecipe === '1';
+    const unitG = isRecipe ? parseFloat(opt.dataset.unitG) : null;
+
     document.getElementById('lf-manual-fields').style.display = isManual ? '' : 'none';
+    document.getElementById('lf-qty-label').textContent = isRecipe ? 'Cantidad (porciones)' : 'Cantidad (gramos)';
+    document.getElementById('lf-qty').placeholder = isRecipe ? 'ej: 1' : 'ej: 200';
+    const hint = document.getElementById('lf-unit-hint');
+    if (isRecipe && unitG) {
+      hint.textContent = `1 porción = ${unitG}g`;
+      hint.style.display = 'block';
+    } else {
+      hint.style.display = 'none';
+    }
     calcMacros();
   }
 
   function calcMacros() {
     const qty = parseFloat(document.getElementById('lf-qty').value) || 0;
     const sel = document.getElementById('lf-food');
-    let kcal100, prot100, fat100, carbs100;
+    let kcal100, prot100, fat100, carbs100, actualG;
     if (sel.value && sel.value !== '__manual__') {
       const opt = sel.options[sel.selectedIndex];
       kcal100=parseFloat(opt.dataset.kcal); prot100=parseFloat(opt.dataset.prot);
       fat100=parseFloat(opt.dataset.fat); carbs100=parseFloat(opt.dataset.carbs);
+      const isRecipe = opt.dataset.isRecipe === '1';
+      actualG = isRecipe ? qty * parseFloat(opt.dataset.unitG || 100) : qty;
     } else if (sel.value === '__manual__') {
       kcal100=parseFloat(document.getElementById('lf-m-kcal').value)||0;
       prot100=parseFloat(document.getElementById('lf-m-prot').value)||0;
       fat100=parseFloat(document.getElementById('lf-m-fat').value)||0;
       carbs100=parseFloat(document.getElementById('lf-m-carbs').value)||0;
+      actualG = qty;
     } else return;
     const prev = document.getElementById('lf-preview');
     if (qty > 0) {
       prev.style.display='';
-      prev.innerHTML=`🔥 <b>${fmt(kcal100*qty/100)}</b> kcal &nbsp; 🥩 ${fmt(prot100*qty/100)}g &nbsp; 🫒 ${fmt(fat100*qty/100)}g &nbsp; 🍚 ${fmt(carbs100*qty/100)}g`;
+      prev.innerHTML=`🔥 <b>${fmt(kcal100*actualG/100)}</b> kcal &nbsp; 🥩 ${fmt(prot100*actualG/100)}g &nbsp; 🫒 ${fmt(fat100*actualG/100)}g &nbsp; 🍚 ${fmt(carbs100*actualG/100)}g`;
     } else { prev.style.display='none'; }
   }
 
@@ -1384,30 +1405,34 @@
     const sel = document.getElementById('lf-food');
     const qty = parseFloat(document.getElementById('lf-qty').value);
     const mealType = document.getElementById('lf-meal').value;
-    if (!sel.value || sel.value === '__manual__' && !sel.value) { toast('Elegí un alimento', false); return; }
+    if (!sel.value) { toast('Elegí un alimento', false); return; }
     if (!qty || qty <= 0) { toast('Ingresá la cantidad', false); return; }
 
-    let foodName, kcal, protein, fat, carbs;
+    let foodName, kcal, protein, fat, carbs, quantityG;
     if (sel.value === '__manual__') {
       foodName = prompt('Nombre del alimento:') || 'Sin nombre';
-      kcal    = parseFloat(document.getElementById('lf-m-kcal').value)||0;
-      protein = parseFloat(document.getElementById('lf-m-prot').value)||0;
-      fat     = parseFloat(document.getElementById('lf-m-fat').value)||0;
-      carbs   = parseFloat(document.getElementById('lf-m-carbs').value)||0;
-      kcal = +(kcal*qty/100).toFixed(1); protein = +(protein*qty/100).toFixed(1);
-      fat  = +(fat*qty/100).toFixed(1);  carbs   = +(carbs*qty/100).toFixed(1);
+      const k=parseFloat(document.getElementById('lf-m-kcal').value)||0;
+      const p=parseFloat(document.getElementById('lf-m-prot').value)||0;
+      const f=parseFloat(document.getElementById('lf-m-fat').value)||0;
+      const c=parseFloat(document.getElementById('lf-m-carbs').value)||0;
+      quantityG = qty;
+      kcal=+(k*qty/100).toFixed(1); protein=+(p*qty/100).toFixed(1);
+      fat=+(f*qty/100).toFixed(1);  carbs=+(c*qty/100).toFixed(1);
     } else {
       const opt = sel.options[sel.selectedIndex];
+      const isRecipe = opt.dataset.isRecipe === '1';
+      const unitG = isRecipe ? parseFloat(opt.dataset.unitG || 100) : 1;
       foodName = opt.dataset.name;
-      kcal    = +(parseFloat(opt.dataset.kcal)*qty/100).toFixed(1);
-      protein = +(parseFloat(opt.dataset.prot)*qty/100).toFixed(1);
-      fat     = +(parseFloat(opt.dataset.fat)*qty/100).toFixed(1);
-      carbs   = +(parseFloat(opt.dataset.carbs)*qty/100).toFixed(1);
+      quantityG = isRecipe ? qty * unitG : qty;
+      kcal    = +(parseFloat(opt.dataset.kcal)*quantityG/100).toFixed(1);
+      protein = +(parseFloat(opt.dataset.prot)*quantityG/100).toFixed(1);
+      fat     = +(parseFloat(opt.dataset.fat)*quantityG/100).toFixed(1);
+      carbs   = +(parseFloat(opt.dataset.carbs)*quantityG/100).toFixed(1);
     }
 
     const res = await fetch('/api/food-log', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ user_id:userId, food_name:foodName, quantity_g:qty,
+      body: JSON.stringify({ user_id:userId, food_name:foodName, quantity_g:quantityG,
         kcal, protein, fat, carbs, meal_type:mealType, date:isoDate(currentDate) })
     });
     if (res.ok) { closeModal('modal-log-food'); toast('Comida registrada'); loadFoodDay(); }
