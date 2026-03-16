@@ -185,10 +185,49 @@
     .food-add-btn:hover { color: var(--accent); }
 
     /* ── Biblioteca ── */
+    .lib-tabs {
+      display: flex; gap: 6px; margin-bottom: 18px;
+    }
+    .lib-tab {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--muted); padding: 7px 16px; border-radius: 8px;
+      font-size: 0.83rem; cursor: pointer; transition: all 0.15s;
+    }
+    .lib-tab:hover { color: var(--text); }
+    .lib-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
     .library-header {
       display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 16px; flex-wrap: wrap; gap: 10px;
     }
+
+    /* ── Recipe builder ── */
+    .recipe-ing-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .recipe-ing-row:last-child { border-bottom: none; }
+    .recipe-ing-name { flex: 1; font-size: 0.85rem; }
+    .recipe-ing-qty  { font-size: 0.82rem; color: var(--muted); min-width: 48px; text-align: right; }
+    .recipe-ing-remove { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 1rem; padding: 0 4px; }
+    #recipe-ing-list { max-height: 200px; overflow-y: auto; margin: 10px 0; }
+    .recipe-macro-preview {
+      display: flex; gap: 12px; flex-wrap: wrap;
+      background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px 14px;
+      font-size: 0.8rem; color: var(--muted); margin-top: 10px;
+    }
+    .recipe-macro-preview span { color: var(--text); font-weight: 600; }
+    .recipe-ing-list { max-height: 180px; overflow-y: auto; margin-bottom: 4px; }
+    .ing-dropdown {
+      position: absolute; top: 100%; left: 0; right: 0; z-index: 200;
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      max-height: 180px; overflow-y: auto; margin-top: 2px;
+    }
+    .ing-dropdown.hidden { display: none; }
+    .ing-dropdown-item {
+      padding: 8px 12px; cursor: pointer; font-size: 0.83rem;
+    }
+    .ing-dropdown-item:hover { background: rgba(255,255,255,0.06); }
     .search-box {
       background: var(--surface); border: 1px solid var(--border);
       color: var(--text); padding: 9px 14px; border-radius: 8px;
@@ -703,50 +742,102 @@
 
   <!-- ══════════════════ BIBLIOTECA ══════════════════ -->
   <div class="panel" id="panel-biblioteca">
-    <div class="library-header">
-      <input class="search-box" type="text" id="food-search" placeholder="🔍 Buscar alimento..." oninput="filterFoods()" />
-      <div style="display:flex; align-items:center; gap:8px;">
-        <label style="font-size:0.82rem; color:var(--muted); white-space:nowrap;">Por:</label>
-        <input type="number" id="lib-qty" value="100" min="1" max="9999"
-          style="width:72px; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:7px 10px; border-radius:8px; font-size:0.88rem; outline:none;"
-          oninput="updateLibQty()" />
-        <span style="font-size:0.82rem; color:var(--muted);">g</span>
+
+    <!-- Sub-tabs -->
+    <div class="lib-tabs">
+      <button class="lib-tab active" id="libtab-alimentos" onclick="showLibTab('alimentos')">🥩 Alimentos</button>
+      <button class="lib-tab" id="libtab-recetas" onclick="showLibTab('recetas')">🍲 Comidas elaboradas</button>
+    </div>
+
+    <!-- ── Alimentos ── -->
+    <div id="libpanel-alimentos">
+      <div class="library-header">
+        <input class="search-box" type="text" id="food-search" placeholder="🔍 Buscar alimento..." oninput="filterFoods()" />
+        <div style="display:flex; align-items:center; gap:8px;">
+          <label style="font-size:0.82rem; color:var(--muted); white-space:nowrap;">Por:</label>
+          <input type="number" id="lib-qty" value="100" min="1" max="9999"
+            style="width:72px; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:7px 10px; border-radius:8px; font-size:0.88rem; outline:none;"
+            oninput="updateLibQty()" />
+          <span style="font-size:0.82rem; color:var(--muted);">g</span>
+        </div>
+        <button class="btn btn-accent" onclick="openNewFoodModal()">+ Nuevo alimento</button>
       </div>
-      <button class="btn btn-accent" onclick="openNewFoodModal()">+ Nuevo alimento</button>
+      <div class="table-wrap">
+        <table class="food-table" id="food-table">
+          <thead>
+            <tr>
+              <th class="sortable" onclick="sortFoods('name')" data-col="name">Alimento <span class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortFoods('kcal')" data-col="kcal">Kcal / <span id="lib-qty-label">100g</span> <span class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortFoods('prot')" data-col="prot">Prot / <span class="lib-qty-label-ref">100g</span> <span class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortFoods('fat')"  data-col="fat">Grasas / <span class="lib-qty-label-ref">100g</span> <span class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortFoods('carbs')" data-col="carbs">Carbos / <span class="lib-qty-label-ref">100g</span> <span class="sort-arrow">↕</span></th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="food-table-body">
+            {% for food in foods %}
+            <tr id="food-row-{{ food.id }}" data-name="{{ food.name | lower }}"
+                data-kcal="{{ food.kcal }}" data-prot="{{ food.protein }}"
+                data-fat="{{ food.fat }}" data-carbs="{{ food.carbs }}">
+              <td>{{ food.name }}</td>
+              <td class="num fv-kcal">{{ food.kcal }}</td>
+              <td class="num fv-prot">{{ food.protein }}</td>
+              <td class="num fv-fat">{{ food.fat }}</td>
+              <td class="num fv-carbs">{{ food.carbs }}</td>
+              <td>
+                <div class="actions">
+                  <button class="btn btn-sm" onclick="openEditFoodModal({{ food.id }}, '{{ food.name }}', {{ food.kcal }}, {{ food.protein }}, {{ food.fat }}, {{ food.carbs }})">✏</button>
+                  <button class="btn btn-sm btn-danger" onclick="confirmDeleteFood({{ food.id }})">🗑</button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-    <div class="table-wrap">
-      <table class="food-table" id="food-table">
-        <thead>
-          <tr>
-            <th class="sortable" onclick="sortFoods('name')" data-col="name">Alimento <span class="sort-arrow">↕</span></th>
-            <th class="sortable" onclick="sortFoods('kcal')" data-col="kcal">Kcal / <span id="lib-qty-label">100g</span> <span class="sort-arrow">↕</span></th>
-            <th class="sortable" onclick="sortFoods('prot')" data-col="prot">Prot / <span class="lib-qty-label-ref">100g</span> <span class="sort-arrow">↕</span></th>
-            <th class="sortable" onclick="sortFoods('fat')"  data-col="fat">Grasas / <span class="lib-qty-label-ref">100g</span> <span class="sort-arrow">↕</span></th>
-            <th class="sortable" onclick="sortFoods('carbs')" data-col="carbs">Carbos / <span class="lib-qty-label-ref">100g</span> <span class="sort-arrow">↕</span></th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="food-table-body">
-          {% for food in foods %}
-          <tr id="food-row-{{ food.id }}" data-name="{{ food.name | lower }}"
-              data-kcal="{{ food.kcal }}" data-prot="{{ food.protein }}"
-              data-fat="{{ food.fat }}" data-carbs="{{ food.carbs }}">
-            <td>{{ food.name }}</td>
-            <td class="num fv-kcal">{{ food.kcal }}</td>
-            <td class="num fv-prot">{{ food.protein }}</td>
-            <td class="num fv-fat">{{ food.fat }}</td>
-            <td class="num fv-carbs">{{ food.carbs }}</td>
-            <td>
-              <div class="actions">
-                <button class="btn btn-sm" onclick="openEditFoodModal({{ food.id }}, '{{ food.name }}', {{ food.kcal }}, {{ food.protein }}, {{ food.fat }}, {{ food.carbs }})">✏</button>
-                <button class="btn btn-sm btn-danger" onclick="confirmDeleteFood({{ food.id }})">🗑</button>
-              </div>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+
+    <!-- ── Comidas elaboradas ── -->
+    <div id="libpanel-recetas" style="display:none;">
+      <div class="library-header">
+        <input class="search-box" type="text" id="recipe-search" placeholder="🔍 Buscar comida..." oninput="filterRecipes()" />
+        <button class="btn btn-accent" onclick="openNewRecipeModal()">+ Nueva comida</button>
+      </div>
+      <div class="table-wrap">
+        <table class="food-table" id="recipe-table">
+          <thead>
+            <tr>
+              <th>Comida</th>
+              <th>Kcal/100g</th>
+              <th>Prot/100g</th>
+              <th>Grasas/100g</th>
+              <th>Carbos/100g</th>
+              <th>Total</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="recipe-table-body">
+            {% for r in recipes %}
+            <tr id="recipe-row-{{ r.id }}" data-name="{{ r.name | lower }}">
+              <td>{{ r.name }}</td>
+              <td class="num">{{ r.kcal }}</td>
+              <td class="num">{{ r.protein }}</td>
+              <td class="num">{{ r.fat }}</td>
+              <td class="num">{{ r.carbs }}</td>
+              <td class="num" style="color:var(--muted);">{{ r.total_g | int }}g</td>
+              <td>
+                <div class="actions">
+                  <button class="btn btn-sm" onclick="openEditRecipeModal({{ r.id }})">✏</button>
+                  <button class="btn btn-sm btn-danger" onclick="confirmDeleteRecipe({{ r.id }})">🗑</button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
+
   </div>
 </main>
 
@@ -910,6 +1001,72 @@
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('modal-edit-food')">Cancelar</button>
       <button class="btn btn-accent" onclick="saveEditFood()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════ MODALES RECETAS ══════════════════ -->
+
+<div class="modal-overlay hidden" id="modal-new-recipe">
+  <div class="modal" style="max-width:540px;">
+    <div class="modal-header"><span class="modal-title">Nueva comida elaborada</span><button class="modal-close" onclick="closeModal('modal-new-recipe')">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Nombre</label><input type="text" id="nr-name" placeholder="ej: Guiso de lentejas" /></div>
+      <label style="font-size:0.8rem; color:var(--muted); margin-bottom:6px; display:block;">Ingredientes</label>
+      <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:8px;">
+        <div class="field" style="flex:1; margin:0;">
+          <input type="text" id="nr-ing-search" placeholder="Buscar alimento..." oninput="filterIngSearch('nr')" autocomplete="off" />
+          <div id="nr-ing-dropdown" class="ing-dropdown hidden"></div>
+        </div>
+        <div class="field" style="width:90px; margin:0;">
+          <input type="number" id="nr-ing-qty" placeholder="g" min="1" />
+        </div>
+        <button class="btn btn-accent" style="height:38px; white-space:nowrap;" onclick="addIngredient('nr')">+ Agregar</button>
+      </div>
+      <div id="nr-ing-list" class="recipe-ing-list"></div>
+      <div class="recipe-macro-preview" id="nr-preview">
+        <div>🔥 Kcal/100g: <span id="nr-p-kcal">—</span></div>
+        <div>🥩 Prot/100g: <span id="nr-p-prot">—</span></div>
+        <div>🫒 Grasas/100g: <span id="nr-p-fat">—</span></div>
+        <div>🌾 Carbos/100g: <span id="nr-p-carbs">—</span></div>
+        <div style="margin-left:auto; color:var(--muted);">Total: <span id="nr-p-total">0</span>g</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-new-recipe')">Cancelar</button>
+      <button class="btn btn-accent" onclick="saveNewRecipe()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="modal-edit-recipe">
+  <div class="modal" style="max-width:540px;">
+    <div class="modal-header"><span class="modal-title">Editar comida elaborada</span><button class="modal-close" onclick="closeModal('modal-edit-recipe')">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Nombre</label><input type="text" id="er-name" /></div>
+      <label style="font-size:0.8rem; color:var(--muted); margin-bottom:6px; display:block;">Ingredientes</label>
+      <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:8px;">
+        <div class="field" style="flex:1; margin:0; position:relative;">
+          <input type="text" id="er-ing-search" placeholder="Buscar alimento..." oninput="filterIngSearch('er')" autocomplete="off" />
+          <div id="er-ing-dropdown" class="ing-dropdown hidden"></div>
+        </div>
+        <div class="field" style="width:90px; margin:0;">
+          <input type="number" id="er-ing-qty" placeholder="g" min="1" />
+        </div>
+        <button class="btn btn-accent" style="height:38px; white-space:nowrap;" onclick="addIngredient('er')">+ Agregar</button>
+      </div>
+      <div id="er-ing-list" class="recipe-ing-list"></div>
+      <div class="recipe-macro-preview" id="er-preview">
+        <div>🔥 Kcal/100g: <span id="er-p-kcal">—</span></div>
+        <div>🥩 Prot/100g: <span id="er-p-prot">—</span></div>
+        <div>🫒 Grasas/100g: <span id="er-p-fat">—</span></div>
+        <div>🌾 Carbos/100g: <span id="er-p-carbs">—</span></div>
+        <div style="margin-left:auto; color:var(--muted);">Total: <span id="er-p-total">0</span>g</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('modal-edit-recipe')">Cancelar</button>
+      <button class="btn btn-accent" onclick="saveEditRecipe()">Guardar</button>
     </div>
   </div>
 </div>
@@ -1389,6 +1546,176 @@
     if (res.ok) { toast('Eliminado'); document.getElementById(`food-row-${id}`)?.remove(); }
     else toast('Error', false);
   }
+
+  // ── Biblioteca sub-tabs ───────────────────────────────────────────────────
+  function showLibTab(tab) {
+    document.getElementById('libpanel-alimentos').style.display = tab === 'alimentos' ? '' : 'none';
+    document.getElementById('libpanel-recetas').style.display   = tab === 'recetas'   ? '' : 'none';
+    document.getElementById('libtab-alimentos').classList.toggle('active', tab === 'alimentos');
+    document.getElementById('libtab-recetas').classList.toggle('active',   tab === 'recetas');
+  }
+
+  // ── Recetas ───────────────────────────────────────────────────────────────
+  let _allFoods = {{ foods | tojson }};
+  let _recipeIngredients = [];   // [{food_id, food_name, quantity_g}]
+  let _editRecipeId = null;
+  let _currentIngPrefix = 'nr'; // 'nr' o 'er'
+
+  function filterRecipes() {
+    const q = document.getElementById('recipe-search').value.toLowerCase();
+    document.querySelectorAll('#recipe-table-body tr').forEach(row => {
+      row.style.display = row.dataset.name.includes(q) ? '' : 'none';
+    });
+  }
+
+  function filterIngSearch(prefix) {
+    const q = document.getElementById(`${prefix}-ing-search`).value.toLowerCase().trim();
+    const dd = document.getElementById(`${prefix}-ing-dropdown`);
+    if (!q) { dd.classList.add('hidden'); return; }
+    const matches = _allFoods.filter(f => f.name.toLowerCase().includes(q)).slice(0, 12);
+    if (!matches.length) { dd.classList.add('hidden'); return; }
+    dd.innerHTML = matches.map(f =>
+      `<div class="ing-dropdown-item" onclick="selectIngredient('${prefix}', ${f.id}, '${f.name.replace(/'/g,"\\'")}')">
+        ${f.name} <span style="color:var(--muted); font-size:0.75rem;">${f.kcal} kcal/100g</span>
+      </div>`
+    ).join('');
+    dd.classList.remove('hidden');
+  }
+
+  function selectIngredient(prefix, foodId, foodName) {
+    document.getElementById(`${prefix}-ing-search`).value = foodName;
+    document.getElementById(`${prefix}-ing-search`).dataset.selectedId = foodId;
+    document.getElementById(`${prefix}-ing-dropdown`).classList.add('hidden');
+    document.getElementById(`${prefix}-ing-qty`).focus();
+  }
+
+  function addIngredient(prefix) {
+    const searchEl = document.getElementById(`${prefix}-ing-search`);
+    const qtyEl    = document.getElementById(`${prefix}-ing-qty`);
+    const foodId   = parseInt(searchEl.dataset.selectedId);
+    const foodName = searchEl.value.trim();
+    const qty      = parseFloat(qtyEl.value);
+    if (!foodId || !foodName || !qty || qty <= 0) { toast('Seleccioná un alimento y cantidad', false); return; }
+
+    const existing = _recipeIngredients.findIndex(i => i.food_id === foodId);
+    if (existing >= 0) {
+      _recipeIngredients[existing].quantity_g += qty;
+    } else {
+      _recipeIngredients.push({ food_id: foodId, food_name: foodName, quantity_g: qty });
+    }
+    searchEl.value = ''; delete searchEl.dataset.selectedId; qtyEl.value = '';
+    renderIngList(prefix);
+    updateRecipePreview(prefix);
+  }
+
+  function removeIngredient(prefix, idx) {
+    _recipeIngredients.splice(idx, 1);
+    renderIngList(prefix);
+    updateRecipePreview(prefix);
+  }
+
+  function renderIngList(prefix) {
+    const el = document.getElementById(`${prefix}-ing-list`);
+    if (!_recipeIngredients.length) { el.innerHTML = ''; return; }
+    el.innerHTML = _recipeIngredients.map((ing, i) =>
+      `<div class="recipe-ing-row">
+        <span class="recipe-ing-name">${ing.food_name}</span>
+        <span class="recipe-ing-qty">${ing.quantity_g}g</span>
+        <button class="recipe-ing-remove" onclick="removeIngredient('${prefix}',${i})">×</button>
+      </div>`
+    ).join('');
+  }
+
+  function updateRecipePreview(prefix) {
+    const totalG = _recipeIngredients.reduce((s, i) => s + i.quantity_g, 0);
+    document.getElementById(`${prefix}-p-total`).textContent = Math.round(totalG);
+    if (!totalG) {
+      ['kcal','prot','fat','carbs'].forEach(k => document.getElementById(`${prefix}-p-${k}`).textContent = '—');
+      return;
+    }
+    let tKcal = 0, tProt = 0, tFat = 0, tCarbs = 0;
+    for (const ing of _recipeIngredients) {
+      const f = _allFoods.find(x => x.id === ing.food_id);
+      if (!f) continue;
+      const r = ing.quantity_g / 100;
+      tKcal  += f.kcal    * r;
+      tProt  += f.protein * r;
+      tFat   += f.fat     * r;
+      tCarbs += f.carbs   * r;
+    }
+    document.getElementById(`${prefix}-p-kcal`).textContent  = (tKcal  / totalG * 100).toFixed(1);
+    document.getElementById(`${prefix}-p-prot`).textContent  = (tProt  / totalG * 100).toFixed(1);
+    document.getElementById(`${prefix}-p-fat`).textContent   = (tFat   / totalG * 100).toFixed(1);
+    document.getElementById(`${prefix}-p-carbs`).textContent = (tCarbs / totalG * 100).toFixed(1);
+  }
+
+  function openNewRecipeModal() {
+    _recipeIngredients = [];
+    _currentIngPrefix  = 'nr';
+    document.getElementById('nr-name').value = '';
+    document.getElementById('nr-ing-search').value = '';
+    document.getElementById('nr-ing-qty').value = '';
+    renderIngList('nr');
+    updateRecipePreview('nr');
+    openModal('modal-new-recipe');
+  }
+
+  async function saveNewRecipe() {
+    const name = document.getElementById('nr-name').value.trim();
+    if (!name)                    { toast('Ingresá un nombre', false); return; }
+    if (!_recipeIngredients.length) { toast('Agregá al menos un ingrediente', false); return; }
+    const res = await fetch('/api/recipe', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name, ingredients: _recipeIngredients })
+    });
+    if (res.ok) { closeModal('modal-new-recipe'); toast('Comida guardada'); setTimeout(() => location.reload(), 800); }
+    else toast('Error al guardar', false);
+  }
+
+  async function openEditRecipeModal(id) {
+    const res = await fetch(`/api/recipe/${id}`);
+    const recipe = await res.json();
+    _editRecipeId      = id;
+    _recipeIngredients = recipe.ingredients.map(i => ({
+      food_id: i.food_id, food_name: i.food_name, quantity_g: i.quantity_g
+    }));
+    _currentIngPrefix  = 'er';
+    document.getElementById('er-name').value = recipe.name;
+    document.getElementById('er-ing-search').value = '';
+    document.getElementById('er-ing-qty').value = '';
+    renderIngList('er');
+    updateRecipePreview('er');
+    openModal('modal-edit-recipe');
+  }
+
+  async function saveEditRecipe() {
+    const name = document.getElementById('er-name').value.trim();
+    if (!name)                    { toast('Ingresá un nombre', false); return; }
+    if (!_recipeIngredients.length) { toast('Agregá al menos un ingrediente', false); return; }
+    const res = await fetch(`/api/recipe/${_editRecipeId}`, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name, ingredients: _recipeIngredients })
+    });
+    if (res.ok) { closeModal('modal-edit-recipe'); toast('Comida actualizada'); setTimeout(() => location.reload(), 800); }
+    else toast('Error al guardar', false);
+  }
+
+  async function confirmDeleteRecipe(id) {
+    if (!confirm('¿Eliminar esta comida elaborada?')) return;
+    const res = await fetch(`/api/recipe/${id}`, { method:'DELETE' });
+    if (res.ok) { toast('Eliminado'); document.getElementById(`recipe-row-${id}`)?.remove(); }
+    else toast('Error', false);
+  }
+
+  // Cerrar dropdown al clickear afuera
+  document.addEventListener('click', e => {
+    ['nr','er'].forEach(p => {
+      const dd = document.getElementById(`${p}-ing-dropdown`);
+      if (dd && !dd.contains(e.target) && e.target.id !== `${p}-ing-search`) {
+        dd.classList.add('hidden');
+      }
+    });
+  });
 
   // ── Semana: gráfico ───────────────────────────────────────────────────────
   async function loadWeekChart() {

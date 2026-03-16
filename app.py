@@ -12,6 +12,7 @@ from database import (
     get_all_foods, add_food, update_food, delete_food,
     log_food_with_date, get_food_logs_by_date, update_food_log, delete_food_log,
     get_food_week_summary,
+    get_all_recipes, get_recipe, create_recipe, update_recipe, delete_recipe,
 )
 from exercises import WORKOUTS
 from exercise_library import EXERCISE_LIBRARY, CATEGORY_INFO, DIFFICULTY_COLORS
@@ -95,8 +96,10 @@ def index():
         })
     exercises_by_day = {k: [e['name'] for e in v['exercises']] for k, v in WORKOUTS.items()}
     foods = get_all_foods()
+    recipes = get_all_recipes()
     return render_template('index.html', users=user_data, workouts=WORKOUTS,
                            exercises_by_day=exercises_by_day, foods=foods,
+                           recipes=recipes,
                            exercise_library=EXERCISE_LIBRARY,
                            category_info=CATEGORY_INFO,
                            difficulty_colors=DIFFICULTY_COLORS)
@@ -213,6 +216,49 @@ def api_update_food(food_id):
 @app.route('/api/food/<int:food_id>', methods=['DELETE'])
 def api_delete_food_item(food_id):
     delete_food(food_id)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/foods')
+def api_list_foods():
+    return jsonify(get_all_foods())
+
+
+# ── API Recetas ───────────────────────────────────────────────────────────────
+
+@app.route('/api/recipe', methods=['POST'])
+def api_create_recipe():
+    data = request.json
+    name = data.get('name', '').strip()
+    ingredients = data.get('ingredients', [])
+    if not name or not ingredients:
+        return jsonify({'error': 'Nombre e ingredientes requeridos'}), 400
+    recipe_id = create_recipe(name, ingredients)
+    return jsonify({'recipe_id': recipe_id})
+
+
+@app.route('/api/recipe/<int:recipe_id>', methods=['GET'])
+def api_get_recipe(recipe_id):
+    recipe = get_recipe(recipe_id)
+    if not recipe:
+        return jsonify({'error': 'No encontrado'}), 404
+    return jsonify(recipe)
+
+
+@app.route('/api/recipe/<int:recipe_id>', methods=['PUT'])
+def api_update_recipe(recipe_id):
+    data = request.json
+    name = data.get('name', '').strip()
+    ingredients = data.get('ingredients', [])
+    if not name or not ingredients:
+        return jsonify({'error': 'Nombre e ingredientes requeridos'}), 400
+    update_recipe(recipe_id, name, ingredients)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/recipe/<int:recipe_id>', methods=['DELETE'])
+def api_delete_recipe(recipe_id):
+    delete_recipe(recipe_id)
     return jsonify({'ok': True})
 
 

@@ -103,6 +103,27 @@ def init_db():
                 key   TEXT PRIMARY KEY,
                 value TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS recipes (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL UNIQUE,
+                total_g    REAL NOT NULL DEFAULT 0,
+                kcal       REAL NOT NULL DEFAULT 0,
+                protein    REAL NOT NULL DEFAULT 0,
+                fat        REAL NOT NULL DEFAULT 0,
+                carbs      REAL NOT NULL DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS recipe_ingredients (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                recipe_id  INTEGER NOT NULL,
+                food_id    INTEGER NOT NULL,
+                food_name  TEXT NOT NULL,
+                quantity_g REAL NOT NULL,
+                FOREIGN KEY (recipe_id) REFERENCES recipes(id),
+                FOREIGN KEY (food_id)   REFERENCES foods(id)
+            );
         ''')
     _seed_foods()
     apply_seed_sql()
@@ -366,6 +387,11 @@ def get_food_by_name(name: str):
                 if row:
                     return _food_row(row)
 
+    # 7. Buscar en recetas
+    recipe = get_recipe_by_name(name)
+    if recipe:
+        return recipe
+
     return None
 
 
@@ -471,6 +497,125 @@ def get_last_food_log(user_id: int):
         if row:
             return {'id': row[0], 'food_name': row[1], 'quantity_g': row[2],
                     'kcal': row[3], 'meal_type': row[4]}
+    return None
+
+
+# ── Recetas / Comidas elaboradas ──────────────────────────────────────────────
+
+def _calc_recipe_macros(conn, ingredients):
+    total_g = sum(i['quantity_g'] for i in ingredients)
+    t_kcal = t_prot = t_fat = t_carbs = 0.0
+    for ing in ingredients:
+        food = conn.execute(
+            'SELECT kcal, protein, fat, carbs FROM foods WHERE id = ?', (ing['food_id'],)
+        ).fetchone()
+        if food:
+            r = ing['quantity_g'] / 100
+            t_kcal  += food[0] * r
+            t_prot  += food[1] * r
+            t_fat   += food[2] * r
+            t_carbs += food[3] * r
+    if total_g == 0:
+        return total_g, 0, 0, 0, 0
+    return (
+        total_g,
+        round(t_kcal  / total_g * 100, 1),
+        round(t_prot  / total_g * 100, 1),
+        round(t_fat   / total_g * 100, 1),
+        round(t_carbs / total_g * 100, 1),
+    )
+
+
+def get_all_recipes():
+    with get_conn() as conn:
+        rows = conn.execute(
+            'SELECT id, name, total_g, kcal, protein, fat, carbs FROM recipes ORDER BY name'
+        ).fetchall()
+        return [
+            {'id': r[0], 'name': r[1], 'total_g': r[2],
+             'kcal': r[3], 'protein': r[4], 'fat': r[5], 'carbs': r[6]}
+            for r in rows
+        ]
+
+
+def get_recipe(recipe_id):
+    with get_conn() as conn:
+        row = conn.execute(
+            'SELECT id, name, total_g, kcal, protein, fat, carbs FROM recipes WHERE id = ?',
+            (recipe_id,)
+        ).fetchone()
+        if not row:
+            return None
+        recipe = {'id': row[0], 'name': row[1], 'total_g': row[2],
+                  'kcal': row[3], 'protein': row[4], 'fat': row[5], 'carbs': row[6]}
+        ings = conn.execute(
+            'SELECT id, food_id, food_name, quantity_g FROM recipe_ingredients WHERE recipe_id = ?',
+            (recipe_id,)
+        ).fetchall()
+        recipe['ingredients'] = [
+            {'id': r[0], 'food_id': r[1], 'food_name': r[2], 'quantity_g': r[3]}
+            for r in ings
+        ]
+        return recipe
+
+
+def create_recipe(name, ingredients):
+    """ingredients: list of {food_id, food_name, quantity_g}"""
+    with get_conn() as conn:
+        total_g, kcal, prot, fat, carbs = _calc_recipe_macros(conn, ingredients)
+        cursor = conn.execute(
+            'INSERT INTO recipes (name, total_g, kcal, protein, fat, carbs) VALUES (?,?,?,?,?,?)',
+            (name, total_g, kcal, prot, fat, carbs)
+        )
+        recipe_id = cursor.lastrowid
+        for ing in ingredients:
+            conn.execute(
+                'INSERT INTO recipe_ingredients (recipe_id, food_id, food_name, quantity_g) VALUES (?,?,?,?)',
+                (recipe_id, ing['food_id'], ing['food_name'], ing['quantity_g'])
+            )
+        return recipe_id
+
+
+def update_recipe(recipe_id, name, ingredients):
+    with get_conn() as conn:
+        total_g, kcal, prot, fat, carbs = _calc_recipe_macros(conn, ingredients)
+        conn.execute(
+            'UPDATE recipes SET name=?, total_g=?, kcal=?, protein=?, fat=?, carbs=? WHERE id=?',
+            (name, total_g, kcal, prot, fat, carbs, recipe_id)
+        )
+        conn.execute('DELETE FROM recipe_ingredients WHERE recipe_id = ?', (recipe_id,))
+        for ing in ingredients:
+            conn.execute(
+                'INSERT INTO recipe_ingredients (recipe_id, food_id, food_name, quantity_g) VALUES (?,?,?,?)',
+                (recipe_id, ing['food_id'], ing['food_name'], ing['quantity_g'])
+            )
+
+
+def delete_recipe(recipe_id):
+    with get_conn() as conn:
+        conn.execute('DELETE FROM recipe_ingredients WHERE recipe_id = ?', (recipe_id,))
+        conn.execute('DELETE FROM recipes WHERE id = ?', (recipe_id,))
+
+
+def get_recipe_by_name(name: str):
+    q = name.lower().strip()
+    with get_conn() as conn:
+        def rsearch(pattern):
+            return conn.execute(
+                'SELECT id, name, kcal, protein, fat, carbs FROM recipes WHERE LOWER(name) LIKE ?',
+                (pattern,)
+            ).fetchone()
+
+        row = conn.execute(
+            'SELECT id, name, kcal, protein, fat, carbs FROM recipes WHERE LOWER(name) = ?', (q,)
+        ).fetchone()
+        if not row:
+            row = rsearch(f'%{q}%')
+        if not row and q.endswith('s') and len(q) > 3:
+            row = rsearch(f'%{q[:-1]}%')
+        if row:
+            return {'id': row[0], 'name': row[1], 'kcal': row[2],
+                    'protein': row[3], 'fat': row[4], 'carbs': row[5], 'is_recipe': True}
     return None
 
 
