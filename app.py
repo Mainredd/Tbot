@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Flask, render_template, request, jsonify
+import anthropic
 
 AR = ZoneInfo("America/Argentina/Buenos_Aires")
 from database import (
@@ -11,7 +12,7 @@ from database import (
     delete_session, delete_exercise,
     get_all_foods, add_food, update_food, delete_food,
     log_food_with_date, get_food_logs_by_date, update_food_log, delete_food_log,
-    get_food_week_summary,
+    get_food_week_summary, get_chat_context,
     get_all_recipes, get_recipe, create_recipe, update_recipe, delete_recipe,
 )
 from exercises import WORKOUTS
@@ -277,6 +278,85 @@ def api_food_week():
         day = (today - timedelta(days=i)).strftime('%Y-%m-%d')
         result.append(day_map.get(day, {'date': day, 'kcal': 0, 'protein': 0}))
     return jsonify({'data': result, 'today': today.strftime('%Y-%m-%d')})
+
+
+# ── Chat con Claude ───────────────────────────────────────────────────────────
+
+@app.route('/api/chat', methods=['POST'])
+def api_chat():
+    data = request.json
+    user_id   = data.get('user_id')
+    message   = data.get('message', '').strip()
+    history   = data.get('history', [])   # [{role, content}, ...]
+    if not user_id or not message:
+        return jsonify({'error': 'Faltan datos'}), 400
+
+    today      = datetime.now(AR).strftime('%Y-%m-%d')
+    week_start = (datetime.now(AR) - timedelta(days=6)).strftime('%Y-%m-%d')
+    ctx = get_chat_context(user_id, today, week_start)
+
+    # Construir texto de contexto
+    food_today_lines = '\n'.join(
+        f"  - {f['name']} {f['qty']}g → {f['kcal']} kcal | {f['prot']}g prot | {f['fat']}g grasas | {f['carbs']}g carbos ({f['meal']})"
+        for f in ctx['food_today']
+    ) or '  (sin registros hoy)'
+
+    today_totals = (
+        sum(f['kcal'] for f in ctx['food_today']),
+        sum(f['prot'] for f in ctx['food_today']),
+        sum(f['fat']  for f in ctx['food_today']),
+        sum(f['carbs'] for f in ctx['food_today']),
+    )
+
+    week_lines = '\n'.join(
+        f"  {d['date']}: {d['kcal']} kcal | {d['prot']}g prot | {d['fat']}g grasas | {d['carbs']}g carbos"
+        for d in ctx['food_week']
+    ) or '  (sin datos esta semana)'
+
+    sessions_lines = '\n'.join(
+        f"  {s['date']} ({s['day_type']}): " + ', '.join(
+            f"{e['name']} {e['weights']}" for e in s['exercises']
+        )
+        for s in ctx['sessions'][:5]
+    ) or '  (sin sesiones recientes)'
+
+    prs_lines = '\n'.join(
+        f"  {ex}: {kg} kg" for ex, kg in sorted(ctx['prs'].items())
+    ) or '  (sin records)'
+
+    system_prompt = f"""Sos un asistente personal de nutrición y fitness. Respondés en español, de forma concisa y directa.
+Sos parte de una app de seguimiento de gym y nutrición. Tenés acceso a los datos reales del usuario.
+
+USUARIO: {ctx['user_name']} (ID: {user_id})
+FECHA HOY: {today}
+
+── COMIDAS DE HOY ──
+{food_today_lines}
+TOTAL HOY: {today_totals[0]:.0f} kcal | {today_totals[1]:.1f}g prot | {today_totals[2]:.1f}g grasas | {today_totals[3]:.1f}g carbos
+
+── RESUMEN SEMANAL (últimos 7 días) ──
+{week_lines}
+
+── ÚLTIMAS SESIONES DE GYM ──
+{sessions_lines}
+
+── RECORDS PERSONALES (kg) ──
+{prs_lines}
+
+Usá estos datos para responder preguntas específicas. Si el usuario pregunta qué comió, cuántas calorías lleva, su progreso en el gym, sugerencias según sus datos, etc., respondé basándote en los datos reales.
+Cuando no tengas datos suficientes, decilo claramente. No inventés valores."""
+
+    ai = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+    messages = history[-10:] + [{'role': 'user', 'content': message}]
+
+    resp = ai.messages.create(
+        model='claude-sonnet-4-5-20250929',
+        max_tokens=1024,
+        system=system_prompt,
+        messages=messages,
+    )
+    reply = resp.content[0].text
+    return jsonify({'reply': reply})
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

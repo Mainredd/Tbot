@@ -639,3 +639,61 @@ def get_food_week_summary(user_id: int, start_date: str):
         ).fetchall()
         return [{'date': r[0], 'kcal': round(r[1], 1), 'protein': round(r[2], 1)}
                 for r in rows]
+
+
+def get_chat_context(user_id: int, today: str, week_start: str) -> dict:
+    """Recopila datos del usuario para contexto del chat con Claude."""
+    with get_conn() as conn:
+        # Comidas de hoy
+        food_today = conn.execute(
+            '''SELECT food_name, quantity_g, kcal, protein, fat, carbs, meal_type
+               FROM food_logs WHERE user_id = ? AND date = ? ORDER BY created_at''',
+            (user_id, today)
+        ).fetchall()
+
+        # Resumen semanal de comidas
+        food_week = conn.execute(
+            '''SELECT date, SUM(kcal), SUM(protein), SUM(fat), SUM(carbs)
+               FROM food_logs WHERE user_id = ? AND date >= ?
+               GROUP BY date ORDER BY date''',
+            (user_id, week_start)
+        ).fetchall()
+
+        # Últimas 10 sesiones de gym con ejercicios
+        sessions = conn.execute(
+            '''SELECT s.id, s.day_type, s.date FROM sessions s
+               WHERE s.user_id = ? ORDER BY s.date DESC LIMIT 10''',
+            (user_id,)
+        ).fetchall()
+        sessions_data = []
+        for sid, day_type, date in sessions:
+            exs = conn.execute(
+                'SELECT exercise_name, weights FROM exercise_logs WHERE session_id = ?',
+                (sid,)
+            ).fetchall()
+            sessions_data.append({
+                'date': date, 'day_type': day_type,
+                'exercises': [{'name': e[0], 'weights': json.loads(e[1])} for e in exs]
+            })
+
+        # Nombre del usuario
+        user_row = conn.execute(
+            'SELECT name FROM users WHERE telegram_id = ?', (user_id,)
+        ).fetchone()
+        user_name = user_row[0] if user_row else 'Usuario'
+
+    prs = get_all_prs(user_id)
+
+    return {
+        'user_name': user_name,
+        'food_today': [
+            {'name': r[0], 'qty': r[1], 'kcal': r[2], 'prot': r[3], 'fat': r[4], 'carbs': r[5], 'meal': r[6]}
+            for r in food_today
+        ],
+        'food_week': [
+            {'date': r[0], 'kcal': round(r[1], 1), 'prot': round(r[2], 1), 'fat': round(r[3], 1), 'carbs': round(r[4], 1)}
+            for r in food_week
+        ],
+        'sessions': sessions_data,
+        'prs': prs,
+    }

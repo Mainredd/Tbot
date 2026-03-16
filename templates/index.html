@@ -439,6 +439,66 @@
       .macro-totals { grid-template-columns: repeat(2, 1fr); }
       .fields-4 { grid-template-columns: repeat(2, 1fr); }
     }
+    /* ── Chat ── */
+    .chat-wrap {
+      display: flex; flex-direction: column; height: calc(100vh - 200px); min-height: 400px;
+    }
+    .chat-user-row {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+    }
+    .chat-user-row select {
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); padding: 7px 12px; border-radius: 8px;
+      font-size: 0.85rem; outline: none;
+    }
+    .chat-messages {
+      flex: 1; overflow-y: auto; padding: 16px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; display: flex; flex-direction: column; gap: 12px;
+      margin-bottom: 12px;
+    }
+    .chat-msg {
+      max-width: 80%; padding: 10px 14px; border-radius: 12px;
+      font-size: 0.85rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+    }
+    .chat-msg.user {
+      align-self: flex-end;
+      background: var(--accent); color: #000; border-bottom-right-radius: 4px;
+    }
+    .chat-msg.assistant {
+      align-self: flex-start;
+      background: var(--card); color: var(--text); border-bottom-left-radius: 4px;
+    }
+    .chat-msg.typing { opacity: 0.6; font-style: italic; }
+    .chat-input-row {
+      display: flex; gap: 8px;
+    }
+    .chat-input-row textarea {
+      flex: 1; background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); padding: 10px 14px; border-radius: 10px;
+      font-size: 0.85rem; resize: none; outline: none; font-family: inherit;
+      min-height: 44px; max-height: 120px;
+    }
+    .chat-input-row textarea:focus { border-color: #555; }
+    .chat-send-btn {
+      background: var(--accent); color: #000; border: none;
+      border-radius: 10px; padding: 0 18px; font-size: 1.1rem;
+      cursor: pointer; font-weight: 700; transition: opacity 0.15s;
+    }
+    .chat-send-btn:disabled { opacity: 0.4; cursor: default; }
+    .chat-empty {
+      text-align: center; color: var(--muted); font-size: 0.85rem;
+      margin: auto; padding: 40px 20px;
+    }
+    .chat-empty .chat-suggestions {
+      display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px;
+    }
+    .chat-suggestion {
+      background: var(--card); border: 1px solid var(--border);
+      color: var(--muted); padding: 6px 12px; border-radius: 20px;
+      font-size: 0.78rem; cursor: pointer; transition: border-color 0.15s;
+    }
+    .chat-suggestion:hover { border-color: var(--accent); color: var(--text); }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -459,6 +519,7 @@
     <div class="tab"         onclick="showPanel('comidas',   this)">🍽 Comidas</div>
     <div class="tab"         onclick="showPanel('biblioteca',this)">📚 Biblioteca</div>
     <div class="tab"         onclick="showPanel('ejercicios',this)">📖 Ejercicios</div>
+    <div class="tab"         onclick="showPanel('chat',      this)">🤖 Asistente</div>
   </div>
 
   <!-- ══════════════════ SESIONES ══════════════════ -->
@@ -839,6 +900,38 @@
     </div>
 
   </div>
+
+  <!-- ══════════════════ CHAT ASISTENTE ══════════════════ -->
+  <div class="panel" id="panel-chat">
+    <div class="chat-wrap">
+      <div class="chat-user-row">
+        <span style="color:var(--muted);font-size:0.82rem;">Consultando como:</span>
+        <select id="chat-user">
+          {% for user in users %}<option value="{{ user.id }}">{{ user.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-empty" id="chat-empty">
+          <div style="font-size:2rem;">🤖</div>
+          <div style="margin-top:8px;">Preguntame sobre tu nutrición y entrenamiento</div>
+          <div class="chat-suggestions">
+            <span class="chat-suggestion" onclick="chatSuggest(this)">¿Cuántas calorías llevo hoy?</span>
+            <span class="chat-suggestion" onclick="chatSuggest(this)">¿Cómo estuvo mi semana en comidas?</span>
+            <span class="chat-suggestion" onclick="chatSuggest(this)">¿Cuáles son mis records?</span>
+            <span class="chat-suggestion" onclick="chatSuggest(this)">¿Qué comí esta semana?</span>
+            <span class="chat-suggestion" onclick="chatSuggest(this)">Dame un resumen de mi progreso</span>
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-row">
+        <textarea id="chat-input" placeholder="Preguntá sobre tu nutrición o entrenamiento..." rows="1"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"
+          oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
+        <button class="chat-send-btn" id="chat-send-btn" onclick="sendChat()">↑</button>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <!-- ══════════════════ MODALES GYM ══════════════════ -->
@@ -1126,7 +1219,7 @@
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.getElementById('panel-' + name).classList.add('active');
     tab.classList.add('active');
-    const btnLabel = { sesiones:'+ Nueva sesión', prs:'', comidas:'+ Registrar comida', biblioteca:'+ Nuevo alimento', ejercicios:'' };
+    const btnLabel = { sesiones:'+ Nueva sesión', prs:'', comidas:'+ Registrar comida', biblioteca:'+ Nuevo alimento', ejercicios:'', chat:'' };
     const btn = document.getElementById('btn-new-action');
     btn.textContent = btnLabel[name] || '+ Nuevo';
     btn.style.display = btnLabel[name] ? '' : 'none';
@@ -1868,6 +1961,61 @@
 
   // Pre-cargar comidas si arranca en esa pestaña
   document.getElementById('date-display').textContent = formatDateDisplay(new Date(currentDate));
+
+  // ── Chat Asistente ────────────────────────────────────────────────────────
+  let _chatHistory = [];
+
+  function chatSuggest(el) {
+    document.getElementById('chat-input').value = el.textContent;
+    sendChat();
+  }
+
+  function appendChatMsg(role, text) {
+    const empty = document.getElementById('chat-empty');
+    if (empty) empty.remove();
+    const msgs = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + role;
+    div.textContent = text;
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+    return div;
+  }
+
+  async function sendChat() {
+    const input = document.getElementById('chat-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+    const userId = document.getElementById('chat-user').value;
+    const btn = document.getElementById('chat-send-btn');
+
+    input.value = '';
+    input.style.height = 'auto';
+    btn.disabled = true;
+
+    appendChatMsg('user', msg);
+    const typingDiv = appendChatMsg('assistant typing', '...');
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: parseInt(userId), message: msg, history: _chatHistory })
+      });
+      const data = await res.json();
+      const reply = data.reply || 'Error al obtener respuesta.';
+      typingDiv.textContent = reply;
+      typingDiv.classList.remove('typing');
+      _chatHistory.push({ role: 'user', content: msg });
+      _chatHistory.push({ role: 'assistant', content: reply });
+      if (_chatHistory.length > 20) _chatHistory = _chatHistory.slice(-20);
+    } catch (e) {
+      typingDiv.textContent = 'Error de conexión.';
+      typingDiv.classList.remove('typing');
+    }
+    btn.disabled = false;
+    input.focus();
+  }
 </script>
 </body>
 </html>
