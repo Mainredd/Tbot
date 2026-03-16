@@ -108,6 +108,7 @@ def init_db():
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 name       TEXT NOT NULL UNIQUE,
                 total_g    REAL NOT NULL DEFAULT 0,
+                servings   INTEGER NOT NULL DEFAULT 1,
                 kcal       REAL NOT NULL DEFAULT 0,
                 protein    REAL NOT NULL DEFAULT 0,
                 fat        REAL NOT NULL DEFAULT 0,
@@ -125,6 +126,12 @@ def init_db():
                 FOREIGN KEY (food_id)   REFERENCES foods(id)
             );
         ''')
+    # Migration: add servings column to existing recipes tables
+    with get_conn() as conn:
+        try:
+            conn.execute('ALTER TABLE recipes ADD COLUMN servings INTEGER NOT NULL DEFAULT 1')
+        except Exception:
+            pass  # column already exists
     _seed_foods()
     apply_seed_sql()
 
@@ -529,11 +536,12 @@ def _calc_recipe_macros(conn, ingredients):
 def get_all_recipes():
     with get_conn() as conn:
         rows = conn.execute(
-            'SELECT id, name, total_g, kcal, protein, fat, carbs FROM recipes ORDER BY name'
+            'SELECT id, name, total_g, servings, kcal, protein, fat, carbs FROM recipes ORDER BY name'
         ).fetchall()
         return [
-            {'id': r[0], 'name': r[1], 'total_g': r[2],
-             'kcal': r[3], 'protein': r[4], 'fat': r[5], 'carbs': r[6]}
+            {'id': r[0], 'name': r[1], 'total_g': r[2], 'servings': r[3],
+             'unit_g': round(r[2] / max(r[3], 1), 1),
+             'kcal': r[4], 'protein': r[5], 'fat': r[6], 'carbs': r[7]}
             for r in rows
         ]
 
@@ -541,13 +549,14 @@ def get_all_recipes():
 def get_recipe(recipe_id):
     with get_conn() as conn:
         row = conn.execute(
-            'SELECT id, name, total_g, kcal, protein, fat, carbs FROM recipes WHERE id = ?',
+            'SELECT id, name, total_g, servings, kcal, protein, fat, carbs FROM recipes WHERE id = ?',
             (recipe_id,)
         ).fetchone()
         if not row:
             return None
-        recipe = {'id': row[0], 'name': row[1], 'total_g': row[2],
-                  'kcal': row[3], 'protein': row[4], 'fat': row[5], 'carbs': row[6]}
+        recipe = {'id': row[0], 'name': row[1], 'total_g': row[2], 'servings': row[3],
+                  'unit_g': round(row[2] / max(row[3], 1), 1),
+                  'kcal': row[4], 'protein': row[5], 'fat': row[6], 'carbs': row[7]}
         ings = conn.execute(
             'SELECT id, food_id, food_name, quantity_g FROM recipe_ingredients WHERE recipe_id = ?',
             (recipe_id,)
@@ -559,13 +568,13 @@ def get_recipe(recipe_id):
         return recipe
 
 
-def create_recipe(name, ingredients):
+def create_recipe(name, ingredients, servings=1):
     """ingredients: list of {food_id, food_name, quantity_g}"""
     with get_conn() as conn:
         total_g, kcal, prot, fat, carbs = _calc_recipe_macros(conn, ingredients)
         cursor = conn.execute(
-            'INSERT INTO recipes (name, total_g, kcal, protein, fat, carbs) VALUES (?,?,?,?,?,?)',
-            (name, total_g, kcal, prot, fat, carbs)
+            'INSERT INTO recipes (name, total_g, servings, kcal, protein, fat, carbs) VALUES (?,?,?,?,?,?,?)',
+            (name, total_g, max(servings, 1), kcal, prot, fat, carbs)
         )
         recipe_id = cursor.lastrowid
         for ing in ingredients:
@@ -576,12 +585,12 @@ def create_recipe(name, ingredients):
         return recipe_id
 
 
-def update_recipe(recipe_id, name, ingredients):
+def update_recipe(recipe_id, name, ingredients, servings=1):
     with get_conn() as conn:
         total_g, kcal, prot, fat, carbs = _calc_recipe_macros(conn, ingredients)
         conn.execute(
-            'UPDATE recipes SET name=?, total_g=?, kcal=?, protein=?, fat=?, carbs=? WHERE id=?',
-            (name, total_g, kcal, prot, fat, carbs, recipe_id)
+            'UPDATE recipes SET name=?, total_g=?, servings=?, kcal=?, protein=?, fat=?, carbs=? WHERE id=?',
+            (name, total_g, max(servings, 1), kcal, prot, fat, carbs, recipe_id)
         )
         conn.execute('DELETE FROM recipe_ingredients WHERE recipe_id = ?', (recipe_id,))
         for ing in ingredients:
@@ -602,20 +611,21 @@ def get_recipe_by_name(name: str):
     with get_conn() as conn:
         def rsearch(pattern):
             return conn.execute(
-                'SELECT id, name, kcal, protein, fat, carbs FROM recipes WHERE LOWER(name) LIKE ?',
+                'SELECT id, name, kcal, protein, fat, carbs, servings, total_g FROM recipes WHERE LOWER(name) LIKE ?',
                 (pattern,)
             ).fetchone()
 
         row = conn.execute(
-            'SELECT id, name, kcal, protein, fat, carbs FROM recipes WHERE LOWER(name) = ?', (q,)
+            'SELECT id, name, kcal, protein, fat, carbs, servings, total_g FROM recipes WHERE LOWER(name) = ?', (q,)
         ).fetchone()
         if not row:
             row = rsearch(f'%{q}%')
         if not row and q.endswith('s') and len(q) > 3:
             row = rsearch(f'%{q[:-1]}%')
         if row:
-            return {'id': row[0], 'name': row[1], 'kcal': row[2],
-                    'protein': row[3], 'fat': row[4], 'carbs': row[5], 'is_recipe': True}
+            return {'id': row[0], 'name': row[1], 'kcal': row[2], 'protein': row[3],
+                    'fat': row[4], 'carbs': row[5], 'is_recipe': True,
+                    'servings': row[6], 'unit_g': round(row[7] / max(row[6], 1), 1)}
     return None
 
 

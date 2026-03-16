@@ -34,7 +34,11 @@ MEAL_EMOJIS = {
 
 # ── Claude: entender intent del mensaje ──────────────────────────────────────
 
-async def understand_intent(text: str) -> dict | None:
+async def understand_intent(text: str, recipe_units: dict | None = None) -> dict | None:
+    recipe_ctx = ''
+    if recipe_units:
+        lines = [f'- 1 {name} = {g}g' for name, g in recipe_units.items()]
+        recipe_ctx = '\nComidas elaboradas (porciones conocidas):\n' + '\n'.join(lines)
     try:
         resp = await ai.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -50,12 +54,12 @@ Detectá el intent:
 
 Palabras clave add_to_library: "agrega", "agregá", "guardá", "guarda", "a la biblioteca", "en la biblioteca".
 
-Conversiones:
+Conversiones estándar:
 - 1 huevo = 55g | 1 clara = 33g | 1 yema = 18g | 1 cucharada = 15g | 1 cucharadita = 5g
 - 1 taza cereal/arroz/avena = 80g | 1 taza líquido = 240g | 1 vaso = 250g
 - 1 rebanada pan = 30g | 1 banana = 120g | 1 manzana = 150g | 1 barra chocolate = 40g
 - meal_type: detectá de contexto (desayuno/almuerzo/merienda/cena), si no → "general"
-
+{recipe_ctx}
 Respuesta JSON exacta:
 {{"intent":"log_food|add_to_library|unknown","items":[{{"food_name":"nombre","quantity_g":0,"meal_type":"general"}}],"food_name":"","kcal":0,"protein":0,"fat":0,"carbs":0}}
 
@@ -660,8 +664,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     thinking = await update.message.reply_text("⏳ Procesando...")
 
-    # 1. Claude entiende el intent
-    parsed = await understand_intent(text)
+    # 1. Claude entiende el intent (con porciones de recetas para conversión de unidades)
+    recipes = db.get_all_recipes()
+    recipe_units = {r['name']: r['unit_g'] for r in recipes if r.get('unit_g', 0) > 0}
+    parsed = await understand_intent(text, recipe_units=recipe_units or None)
     intent = parsed.get('intent', 'unknown') if parsed else 'unknown'
 
     if not parsed or intent == 'unknown':

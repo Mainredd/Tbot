@@ -812,7 +812,7 @@
               <th>Prot/100g</th>
               <th>Grasas/100g</th>
               <th>Carbos/100g</th>
-              <th>Total</th>
+              <th>Porción</th>
               <th></th>
             </tr>
           </thead>
@@ -824,7 +824,7 @@
               <td class="num">{{ r.protein }}</td>
               <td class="num">{{ r.fat }}</td>
               <td class="num">{{ r.carbs }}</td>
-              <td class="num" style="color:var(--muted);">{{ r.total_g | int }}g</td>
+              <td class="num" style="color:var(--muted);">{{ r.unit_g | int }}g × {{ r.servings }}</td>
               <td>
                 <div class="actions">
                   <button class="btn btn-sm" onclick="openEditRecipeModal({{ r.id }})">✏</button>
@@ -1011,7 +1011,10 @@
   <div class="modal" style="max-width:540px;">
     <div class="modal-header"><span class="modal-title">Nueva comida elaborada</span><button class="modal-close" onclick="closeModal('modal-new-recipe')">×</button></div>
     <div class="modal-body">
-      <div class="field"><label>Nombre</label><input type="text" id="nr-name" placeholder="ej: Guiso de lentejas" /></div>
+      <div style="display:flex; gap:12px;">
+        <div class="field" style="flex:1;"><label>Nombre</label><input type="text" id="nr-name" placeholder="ej: Guiso de lentejas" /></div>
+        <div class="field" style="width:110px;"><label>Porciones</label><input type="number" id="nr-servings" value="1" min="1" placeholder="1" /></div>
+      </div>
       <label style="font-size:0.8rem; color:var(--muted); margin-bottom:6px; display:block;">Ingredientes</label>
       <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:8px;">
         <div class="field" style="flex:1; margin:0; position:relative;">
@@ -1043,7 +1046,10 @@
   <div class="modal" style="max-width:540px;">
     <div class="modal-header"><span class="modal-title">Editar comida elaborada</span><button class="modal-close" onclick="closeModal('modal-edit-recipe')">×</button></div>
     <div class="modal-body">
-      <div class="field"><label>Nombre</label><input type="text" id="er-name" /></div>
+      <div style="display:flex; gap:12px;">
+        <div class="field" style="flex:1;"><label>Nombre</label><input type="text" id="er-name" /></div>
+        <div class="field" style="width:110px;"><label>Porciones</label><input type="number" id="er-servings" value="1" min="1" /></div>
+      </div>
       <label style="font-size:0.8rem; color:var(--muted); margin-bottom:6px; display:block;">Ingredientes</label>
       <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:8px;">
         <div class="field" style="flex:1; margin:0; position:relative;">
@@ -1652,7 +1658,8 @@
   function openNewRecipeModal() {
     _recipeIngredients = [];
     _currentIngPrefix  = 'nr';
-    document.getElementById('nr-name').value = '';
+    document.getElementById('nr-name').value     = '';
+    document.getElementById('nr-servings').value = '1';
     document.getElementById('nr-ing-search').value = '';
     document.getElementById('nr-ing-qty').value = '';
     renderIngList('nr');
@@ -1666,7 +1673,7 @@
     if (!_recipeIngredients.length) { toast('Agregá al menos un ingrediente', false); return; }
     const res = await fetch('/api/recipe', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ name, ingredients: _recipeIngredients })
+      body: JSON.stringify({ name, servings: parseInt(document.getElementById('nr-servings').value)||1, ingredients: _recipeIngredients })
     });
     if (res.ok) { closeModal('modal-new-recipe'); toast('Comida guardada'); setTimeout(() => location.reload(), 800); }
     else toast('Error al guardar', false);
@@ -1680,7 +1687,8 @@
       food_id: i.food_id, food_name: i.food_name, quantity_g: i.quantity_g
     }));
     _currentIngPrefix  = 'er';
-    document.getElementById('er-name').value = recipe.name;
+    document.getElementById('er-name').value     = recipe.name;
+    document.getElementById('er-servings').value = recipe.servings || 1;
     document.getElementById('er-ing-search').value = '';
     document.getElementById('er-ing-qty').value = '';
     renderIngList('er');
@@ -1694,7 +1702,7 @@
     if (!_recipeIngredients.length) { toast('Agregá al menos un ingrediente', false); return; }
     const res = await fetch(`/api/recipe/${_editRecipeId}`, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ name, ingredients: _recipeIngredients })
+      body: JSON.stringify({ name, servings: parseInt(document.getElementById('er-servings').value)||1, ingredients: _recipeIngredients })
     });
     if (res.ok) { closeModal('modal-edit-recipe'); toast('Comida actualizada'); setTimeout(() => location.reload(), 800); }
     else toast('Error al guardar', false);

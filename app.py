@@ -233,7 +233,7 @@ def api_create_recipe():
     ingredients = data.get('ingredients', [])
     if not name or not ingredients:
         return jsonify({'error': 'Nombre e ingredientes requeridos'}), 400
-    recipe_id = create_recipe(name, ingredients)
+    recipe_id = create_recipe(name, ingredients, servings=data.get('servings', 1))
     return jsonify({'recipe_id': recipe_id})
 
 
@@ -252,7 +252,7 @@ def api_update_recipe(recipe_id):
     ingredients = data.get('ingredients', [])
     if not name or not ingredients:
         return jsonify({'error': 'Nombre e ingredientes requeridos'}), 400
-    update_recipe(recipe_id, name, ingredients)
+    update_recipe(recipe_id, name, ingredients, servings=data.get('servings', 1))
     return jsonify({'ok': True})
 
 
