@@ -180,19 +180,41 @@ Devolvé SOLO este JSON sin markdown:
         protein = best('protein')
         fat     = best('fat')
 
-        # ── Extracción de grasas por regex sobre texto verbatim ──────────────
-        # Claude copia el texto crudo; Python extrae el número → evita confusión
-        # con Grasas saturadas/trans/mono/poli
+        # ── Extracción por regex sobre texto verbatim ────────────────────────
+        # Evita que Claude confunda kJ con kcal, o sume grasas totales + saturadas
+
+        def extract_kcal_from_text(kcal_text: str) -> float | None:
+            """Busca 'NUMBER kcal' → ignora kJ."""
+            if not kcal_text:
+                return None
+            m = re.search(r'(\d+[.,]\d+|\d+)\s*kcal', kcal_text, re.IGNORECASE)
+            if m:
+                return float(m.group(1).replace(',', '.'))
+            return None
+
         def extract_fat_from_text(fat_text: str, fat_100g_text: str) -> float | None:
-            # Si hay columna 100g, extraer de fat_100g_text
             for txt in [fat_100g_text, fat_text]:
                 if not txt:
                     continue
-                # Busca el PRIMER número decimal o entero en el texto
                 m = re.search(r'(\d+[.,]\d+|\d+)\s*g?\b', txt)
                 if m:
                     return float(m.group(1).replace(',', '.'))
             return None
+
+        # Kcal: priorizar regex sobre kcal_text (evita leer kJ)
+        kcal_text = d.get('kcal_text', '')
+        kcal_from_text = extract_kcal_from_text(kcal_text)
+        if kcal_from_text is not None and kcal_from_text > 0:
+            if has_col:
+                # Si hay columna /100g, el texto verbatim es por porción → convertir
+                # solo si el valor extraído es claramente por porción (< 800)
+                if kcal_from_text < 800 and portion > 0:
+                    kcal_from_text = round(kcal_from_text * 100.0 / portion, 1)
+            else:
+                if portion > 0:
+                    kcal_from_text = round(kcal_from_text * 100.0 / portion, 1)
+            logging.info(f"[kcal_text] '{kcal_text}' → kcal={kcal_from_text} (antes={kcal})")
+            kcal = kcal_from_text
 
         fat_text     = d.get('fat_text', '')
         fat_100g_txt = d.get('fat_100g_text', '')
@@ -203,7 +225,6 @@ Devolvé SOLO este JSON sin markdown:
             fat_from_text = extract_fat_from_text(fat_text, '')
 
         if fat_from_text is not None and fat_from_text >= 0:
-            # Convertir a /100g si es necesario
             if not has_col and portion > 0:
                 fat_from_text = round(fat_from_text * 100.0 / portion, 1)
             logging.info(f"[fat_text] '{fat_text}' → fat={fat_from_text} (antes={fat})")
